@@ -3,7 +3,7 @@ Sentinel AI — Incidents API
 CRUD operations for incidents + status tracking.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from typing import Optional
@@ -11,6 +11,7 @@ from uuid import UUID
 
 from app.db.database import get_db
 from app.models.incident import Incident, IncidentStatus
+from app.auth.clerk import get_current_tenant
 
 router = APIRouter()
 
@@ -20,14 +21,15 @@ async def list_incidents(
     severity: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all incidents with optional filtering."""
-    query = select(Incident).order_by(desc(Incident.created_at))
-
-    if tenant_id:
-        query = query.where(Incident.tenant_id == tenant_id)
+    """List incidents for the caller's tenant, with optional filtering."""
+    query = (
+        select(Incident)
+        .where(Incident.tenant_id == tenant_id)
+        .order_by(desc(Incident.created_at))
+    )
 
     if status:
         query = query.where(Incident.status == status)
@@ -66,14 +68,14 @@ async def list_incidents(
 @router.get("/{incident_id}")
 async def get_incident(
     incident_id: UUID,
-    tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get full incident details including timeline."""
-    query = select(Incident).where(Incident.id == incident_id)
-    if tenant_id:
-        query = query.where(Incident.tenant_id == tenant_id)
-        
+    """Get full incident details including timeline (scoped to the caller's tenant)."""
+    query = select(Incident).where(
+        Incident.id == incident_id,
+        Incident.tenant_id == tenant_id,
+    )
     result = await db.execute(query)
     incident = result.scalar_one_or_none()
 
@@ -114,11 +116,15 @@ async def get_incident(
 @router.post("/{incident_id}/approve-fix")
 async def approve_fix(
     incident_id: UUID,
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually approve a proposed fix (human-in-the-loop)."""
+    """Manually approve a proposed fix (human-in-the-loop), scoped to the caller's tenant."""
     result = await db.execute(
-        select(Incident).where(Incident.id == incident_id)
+        select(Incident).where(
+            Incident.id == incident_id,
+            Incident.tenant_id == tenant_id,
+        )
     )
     incident = result.scalar_one_or_none()
 

@@ -12,6 +12,7 @@ import structlog
 
 from app.agents.orchestrator import process_alert
 from app.api.auth import get_tenant_from_api_key
+from app.auth.clerk import get_current_tenant
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -120,13 +121,21 @@ async def receive_generic_alert(
 
 
 @router.post("/test")
-async def send_test_alert(background_tasks: BackgroundTasks):
+async def send_test_alert(
+    background_tasks: BackgroundTasks,
+    tenant_id: str = Depends(get_current_tenant),
+):
     """
     Send a test alert to verify the pipeline works end-to-end.
     Simulates a pod CrashLoopBackOff alert.
+
+    Authenticated via the dashboard Clerk session — the resulting incident is
+    attributed to the caller's tenant (previously this was unauthenticated and
+    triggered the full investigation+remediation pipeline anonymously).
     """
     test_alert = GenericAlert(
         source="test",
+        tenant_id=tenant_id,
         title="Pod CrashLoopBackOff: payment-service",
         description="Pod payment-service-7d4f8b6c5-x9k2l is in CrashLoopBackOff state. Container has restarted 5 times in the last 10 minutes.",
         severity="critical",

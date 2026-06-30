@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str | None = None
 
+    # Clerk (dashboard auth)
+    # The backend verifies Clerk session JWTs server-side and derives tenant_id
+    # from the verified `org_id` claim. ISSUER/JWKS are auto-derived from the
+    # publishable key when not set explicitly (the publishable key is public).
+    CLERK_PUBLISHABLE_KEY: str | None = None
+    CLERK_SECRET_KEY: str | None = None
+    CLERK_ISSUER: str | None = None
+    CLERK_JWKS_URL: str | None = None
+
     # Slack
     SLACK_BOT_TOKEN: str | None = None
     SLACK_APP_TOKEN: str | None = None

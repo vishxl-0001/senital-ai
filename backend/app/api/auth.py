@@ -13,6 +13,7 @@ import string
 
 from app.db.database import get_db
 from app.models.tenant import ApiKey
+from app.auth.clerk import get_current_tenant
 
 router = APIRouter()
 
@@ -59,12 +60,10 @@ async def get_tenant_from_api_key(
 @router.post("/keys")
 async def create_api_key(
     name: str,
-    # In a real app, tenant_id comes from Clerk JWT. 
-    # For now, we simulate it via a header or request body for integration.
-    tenant_id: str, 
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new API Key for a tenant (called by the dashboard)."""
+    """Create a new API Key for the caller's tenant (called by the dashboard)."""
     raw_key = generate_raw_api_key()
     key_hash = hash_api_key(raw_key)
     prefix = raw_key[:12] + "..."
@@ -90,10 +89,10 @@ async def create_api_key(
 
 @router.get("/keys")
 async def list_api_keys(
-    tenant_id: str,
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db)
 ):
-    """List API keys for a tenant."""
+    """List API keys for the caller's tenant."""
     result = await db.execute(
         select(ApiKey).where(ApiKey.tenant_id == tenant_id).order_by(desc(ApiKey.created_at))
     )

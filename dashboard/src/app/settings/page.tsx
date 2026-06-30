@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { UserButton, useAuth } from "@clerk/nextjs";
-import { 
-  ShieldAlert, Activity, Terminal, Settings, FileText, 
+import { UserButton } from "@clerk/nextjs";
+import { listApiKeys, createApiKey as createApiKeyRequest } from "@/lib/api";
+import {
+  ShieldAlert, Activity, Terminal, Settings, FileText,
   LayoutDashboard, Key, Plus, Trash2, Copy, Check
 } from "lucide-react";
 
 export default function SettingsPage() {
-  const { orgId, userId } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [apiKeys, setApiKeys] = useState<any[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
@@ -17,40 +17,31 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Fallback to userId if orgId is null (personal account)
-  const tenantId = orgId || userId || "default";
-
-  useEffect(() => {
-    setMounted(true);
-    fetchApiKeys();
-  }, [tenantId]);
-
-  const fetchApiKeys = async () => {
-    if (!tenantId) return;
+  // The backend derives the tenant from the verified Clerk session JWT — the
+  // client never sends tenant_id. listApiKeys()/createApiKey() attach the
+  // session token via the shared authed API client.
+  const loadApiKeys = async () => {
     try {
-      const res = await fetch(`/api/v1/auth/keys?tenant_id=${tenantId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setApiKeys(data.api_keys || []);
-      }
+      const data = await listApiKeys();
+      setApiKeys(data.api_keys || []);
     } catch (err) {
       console.error("Failed to fetch API keys", err);
     }
   };
 
+  useEffect(() => {
+    setMounted(true);
+    loadApiKeys();
+  }, []);
+
   const createApiKey = async () => {
-    if (!newKeyName.trim() || !tenantId) return;
+    if (!newKeyName.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/auth/keys?name=${encodeURIComponent(newKeyName)}&tenant_id=${tenantId}`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGeneratedKey(data.api_key);
-        setNewKeyName("");
-        fetchApiKeys(); // Refresh list
-      }
+      const data = await createApiKeyRequest(newKeyName);
+      setGeneratedKey(data.api_key);
+      setNewKeyName("");
+      loadApiKeys(); // Refresh list
     } catch (err) {
       console.error("Failed to create API key", err);
     }

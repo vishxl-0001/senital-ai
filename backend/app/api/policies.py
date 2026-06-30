@@ -3,7 +3,7 @@ Sentinel AI — Policies API
 Manage auto-fix policies (what AI can do automatically).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.db.database import get_db
 from app.models.incident import Policy
+from app.auth.clerk import get_current_tenant
 
 router = APIRouter()
 
@@ -28,14 +29,15 @@ class PolicyCreate(BaseModel):
 
 @router.get("")
 async def list_policies(
-    tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db)
 ):
-    """List all auto-fix policies."""
-    query = select(Policy).order_by(Policy.created_at)
-    if tenant_id:
-        query = query.where(Policy.tenant_id == tenant_id)
-        
+    """List the caller's tenant's auto-fix policies."""
+    query = (
+        select(Policy)
+        .where(Policy.tenant_id == tenant_id)
+        .order_by(Policy.created_at)
+    )
     result = await db.execute(query)
     policies = result.scalars().all()
 
@@ -60,10 +62,10 @@ async def list_policies(
 @router.post("/")
 async def create_policy(
     policy: PolicyCreate,
-    tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new auto-fix policy."""
+    """Create a new auto-fix policy for the caller's tenant."""
     new_policy = Policy(
         tenant_id=tenant_id,
         name=policy.name,
@@ -86,7 +88,7 @@ async def create_policy(
 
 @router.post("/seed-defaults")
 async def seed_default_policies(
-    tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    tenant_id: str = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db)
 ):
     """

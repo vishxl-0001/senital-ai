@@ -67,6 +67,17 @@ async def process_alert(alert):
         severity=alert.severity,
     )
 
+    # Defensive: every incident-creating path must supply a tenant. Without one
+    # we cannot scope the incident, so we refuse rather than create an
+    # unattributed (NULL-tenant) row that would be visible across tenants.
+    if not getattr(alert, "tenant_id", None):
+        log.error(
+            "Refusing to process alert with no tenant_id",
+            alert_title=alert.title,
+            source=alert.source,
+        )
+        return {"status": "rejected", "reason": "missing tenant_id"}
+
     async with async_session() as db:
         try:
             # ── Step 1: Deduplication ──
@@ -242,7 +253,8 @@ async def process_alert(alert):
             )
             try:
                 incident.status = IncidentStatus.FAILED
-                await _add_timeline(db, incident.id, "error", "Pipeline failed", str(e))
+                await _add_timeline(db, incident.id, "error", "Pipeline failed", str(e),
+                                    tenant_id=alert.tenant_id)
                 await db.commit()
             except Exception:
                 pass
