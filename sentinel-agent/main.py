@@ -16,6 +16,8 @@ import json
 import logging
 from datetime import datetime
 
+from executor import build_argv
+
 # ── Configuration ──
 SENTINEL_SAAS_URL = os.environ.get("SENTINEL_SAAS_URL", "http://localhost:8000")
 API_KEY = os.environ.get("SENTINEL_AGENT_KEY", "your-organization-api-key")
@@ -32,10 +34,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("sentinel-agent")
 
 
-def run_cmd(command: str) -> str:
-    """Run a shell command and return stdout."""
+def run_cmd(args: list, timeout: int = 30) -> str:
+    """Run an argv list (NO shell) and return stdout, or '' on failure."""
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(args, shell=False, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             return ""
         return result.stdout.strip()
@@ -57,7 +59,7 @@ class LogConfigMonitor:
         
         # In a real environment, this would use the kubernetes python client.
         # Here we use kubectl as an example if available, or simulate if not.
-        kubectl_available = run_cmd("which kubectl")
+        kubectl_available = run_cmd(["which", "kubectl"])
         
         if kubectl_available:
             self._check_k8s_pods()
@@ -66,7 +68,8 @@ class LogConfigMonitor:
 
     def _check_k8s_pods(self):
         """Check for pods in CrashLoopBackOff or Error states."""
-        output = run_cmd("kubectl get pods -A --field-selector=status.phase!=Running -o json")
+        output = run_cmd(["kubectl", "get", "pods", "-A",
+                          "--field-selector=status.phase!=Running", "-o", "json"])
         if not output:
             return
             
@@ -85,7 +88,7 @@ class LogConfigMonitor:
                 self.seen_errors.add(alert_key)
                 
                 # Fetch logs for the failing pod
-                logs = run_cmd(f"kubectl logs {name} -n {namespace} --tail=50")
+                logs = run_cmd(["kubectl", "logs", name, "-n", namespace, "--tail=50"])
                 
                 self.send_alert(
                     title=f"Pod Failure: {name} in {namespace}",
@@ -149,21 +152,29 @@ def poll_for_fixes():
         logger.error(f"Failed to poll Sentinel SaaS: {e}")
 
 def execute_fix(fix_data):
-    """Execute the fix command locally."""
+    """Execute a structured, whitelisted fix action locally (no shell)."""
     incident_id = fix_data["incident_id"]
-    command = fix_data["command"]
-    
-    logger.info(f"⚙️ Executing fix for incident {incident_id}: {command}")
-    
+    action = fix_data.get("action") or {}
+
+    # Build the argv from the typed action. A disallowed type or an invalid
+    # namespace/resource is REFUSED — we never fall back to a shell string.
     try:
-        # Warning: In production, commands should be strictly validated against an allowlist!
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=120)
-        
+        argv = build_argv(action)
+    except ValueError as e:
+        logger.error(f"🚫 Refusing unsafe/unknown fix for {incident_id}: {e}")
+        report_results(incident_id, "failed", f"Rejected by agent allowlist: {e}")
+        return
+
+    logger.info(f"⚙️ Executing {action.get('type')} for incident {incident_id}: {argv}")
+
+    try:
+        result = subprocess.run(argv, shell=False, capture_output=True, text=True, timeout=120)
+
         status = "success" if result.returncode == 0 else "failed"
         output = result.stdout if result.returncode == 0 else result.stderr
-        
+
         report_results(incident_id, status, output)
-        
+
     except subprocess.TimeoutExpired:
         logger.error(f"Fix execution timed out for {incident_id}")
         report_results(incident_id, "failed", "Command execution timed out after 120s")

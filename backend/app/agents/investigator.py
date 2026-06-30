@@ -83,13 +83,14 @@ async def investigate_incident(alert) -> dict:
         if commits:
             github_context = json.dumps(commits, indent=2)
 
-    # 2. Fetch Prometheus Context
-    prom_context = "No relevant metrics found."
-    # Build a simple mock query based on alert title
-    mock_query = f"sum(rate(http_requests_total{{pod=~'.*{alert.title}.*'}}[5m]))"
-    metrics = await query_prometheus(mock_query)
-    if metrics:
-        prom_context = json.dumps(metrics, indent=2)
+    # 2. Fetch Prometheus Context (real metrics only — never fabricated)
+    prom_context = "No metrics available (Prometheus not configured or unreachable)."
+    metrics_available = False
+    promql = f"sum(rate(http_requests_total{{pod=~'.*{alert.title}.*'}}[5m]))"
+    prom = await query_prometheus(promql)
+    if prom.get("status") == "success" and prom.get("result"):
+        prom_context = json.dumps(prom["result"], indent=2)
+        metrics_available = True
 
     prompt = INVESTIGATION_PROMPT.format(
         title=alert.title,
@@ -123,6 +124,9 @@ async def investigate_incident(alert) -> dict:
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json.loads(raw)
+        # Tell downstream RCA whether real metrics backed this investigation,
+        # so it can temper confidence when metrics were unavailable.
+        result["metrics_available"] = metrics_available
 
         log.info(
             "✅ Investigation complete",
@@ -143,4 +147,5 @@ async def investigate_incident(alert) -> dict:
             "affected_services": list(alert.labels.values()) if alert.labels else [],
             "impact_assessment": "Unable to assess — investigation failed",
             "investigation_summary": f"Automated investigation failed: {str(e)}. Manual review required.",
+            "metrics_available": metrics_available,
         }

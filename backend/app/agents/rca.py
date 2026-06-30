@@ -59,6 +59,32 @@ Be specific and definitive. Don't just repeat symptoms — identify the underlyi
 """
 
 
+def adjust_confidence_for_metrics(result: dict, metrics_available: bool) -> dict:
+    """
+    Temper RCA confidence when no live metrics backed the investigation.
+
+    Without Prometheus data the RCA is reasoning on logs + context only, so we
+    cap and lightly penalize confidence and annotate the evidence — rather than
+    letting the model report high confidence as if metrics had confirmed it.
+    """
+    if metrics_available:
+        return result
+    try:
+        original = float(result.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        original = 0.0
+    result["confidence"] = round(min(original, 0.6) * 0.9, 2)
+    result.setdefault("evidence", []).append({
+        "type": "metric",
+        "description": (
+            "Live metrics were unavailable (Prometheus not configured or "
+            "unreachable); confidence reduced — RCA based on logs and context only."
+        ),
+        "weight": "weak",
+    })
+    return result
+
+
 async def generate_rca(alert, investigation: dict, similar_incidents: list = None) -> dict:
     """
     Generate Root Cause Analysis from investigation findings and past similar incidents.
@@ -98,6 +124,10 @@ async def generate_rca(alert, investigation: dict, similar_incidents: list = Non
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         result = json.loads(raw)
+
+        # Factor metric availability into the confidence score (no fabricated data).
+        metrics_available = bool(investigation.get("metrics_available")) if investigation else False
+        result = adjust_confidence_for_metrics(result, metrics_available)
 
         log.info(
             "✅ RCA complete",

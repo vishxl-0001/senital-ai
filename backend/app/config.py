@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     GITHUB_TOKEN: str | None = None
     GITHUB_ORG: str | None = None
 
+    # Monitoring / Prometheus
+    # When PROMETHEUS_URL is unset, metric queries return {"status": "no_data"}
+    # instead of fabricated numbers. PROMETHEUS_ALLOW_MOCK serves canned sample
+    # series for local development ONLY (and only when APP_ENV=development).
+    PROMETHEUS_URL: str | None = None
+    PROMETHEUS_ALLOW_MOCK: bool = False
+
     class Config:
         env_file = ".env"
         case_sensitive = True

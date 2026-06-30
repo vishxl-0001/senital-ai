@@ -4,16 +4,18 @@ Endpoints for the remote Sentinel Agent running in customer infrastructure.
 Agents poll for fixes to execute, and report back results.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+import structlog
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from typing import Optional
 
 from app.db.database import get_db
 from app.models.incident import Incident, IncidentStatus
 from app.api.auth import get_tenant_from_api_key
+from app.engine.k8s_actions import build_structured_action
 
+log = structlog.get_logger()
 router = APIRouter()
 
 class FixReport(BaseModel):
@@ -37,22 +39,26 @@ async def get_pending_fixes(
     
     fixes = []
     for inc in incidents:
-        if inc.fix_plan and "steps" in inc.fix_plan:
-            # We assume the agent just needs a shell command for now
-            # In a real system, fix_plan would have a structured list of commands
-            steps = inc.fix_plan["steps"]
-            command = " && ".join([s["command"] for s in steps if "command" in s])
-            
-            if command:
-                fixes.append({
-                    "incident_id": str(inc.id),
-                    "command": command
-                })
-                # Mark as executing so another agent doesn't pick it up
-                inc.status = IncidentStatus.FIX_EXECUTING
-                
+        # Hand the agent a structured, whitelisted action — never a free-form
+        # shell string. If the fix can't be mapped to an allowed action type,
+        # we refuse to dispatch it (leave it for a human) rather than guess.
+        action = build_structured_action(inc.fix_plan or {})
+        if action:
+            fixes.append({
+                "incident_id": str(inc.id),
+                "action": action,
+            })
+            # Mark as executing so another agent doesn't pick it up
+            inc.status = IncidentStatus.FIX_EXECUTING
+        else:
+            log.warning(
+                "No whitelisted action could be built for incident — not dispatching",
+                incident_id=str(inc.id),
+                fix_type=(inc.fix_plan or {}).get("fix_type"),
+            )
+
     await db.commit()
-    
+
     return {"fixes": fixes}
 
 
