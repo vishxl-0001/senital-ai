@@ -44,3 +44,7 @@ logs/
 # Database
 *.db
 *.sqlite3
+
+# stray Azure CLI error log (never commit)
+az_error.log
+*.log
