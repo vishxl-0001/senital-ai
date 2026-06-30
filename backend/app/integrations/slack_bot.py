@@ -110,7 +110,7 @@ def build_incident_blocks(incident_data: dict, is_resolved: bool = False) -> lis
                         "type": "button",
                         "text": {"type": "plain_text", "text": "📋 View Details"},
                         "action_id": "view_details",
-                        "url": f"http://localhost:3000/incidents/{incident_id}",
+                        "url": f"{settings.FRONTEND_BASE_URL.rstrip('/')}/incidents/{incident_id}",
                     },
                 ],
             }

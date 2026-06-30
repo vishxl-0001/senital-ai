@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str | None = None
     SLACK_APP_TOKEN: str | None = None
     SLACK_SIGNING_SECRET: str | None = None
+    # Per-tenant Slack OAuth (item 13) — populated once the Slack App exists.
+    SLACK_CLIENT_ID: str | None = None
+    SLACK_CLIENT_SECRET: str | None = None
+
+    # Base URL of the dashboard, used to build incident links in Slack messages.
+    # Configurable so it isn't hardcoded to localhost in production.
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
 
     # GitHub
     GITHUB_PAT: str | None = None

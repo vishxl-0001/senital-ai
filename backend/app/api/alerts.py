@@ -4,13 +4,13 @@ Receives alerts from Prometheus AlertManager, Datadog, etc.
 This is the ENTRY POINT for all incidents.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Request, Depends
+from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import structlog
 
-from app.agents.orchestrator import process_alert
+from app.worker import process_alert_task
 from app.api.auth import get_tenant_from_api_key
 from app.auth.clerk import get_current_tenant
 
@@ -56,7 +56,6 @@ class GenericAlert(BaseModel):
 @router.post("/webhook/prometheus")
 async def receive_prometheus_alert(
     payload: AlertManagerPayload,
-    background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_tenant_from_api_key),
 ):
     """
@@ -85,7 +84,8 @@ async def receive_prometheus_alert(
             labels=alert.labels,
             raw_payload=alert.model_dump(),
         )
-        background_tasks.add_task(process_alert, normalized)
+        # Durable dispatch to Celery (survives restarts, bounded concurrency).
+        process_alert_task.delay(normalized.model_dump())
 
     return {
         "status": "accepted",
@@ -97,7 +97,6 @@ async def receive_prometheus_alert(
 @router.post("/webhook/generic")
 async def receive_generic_alert(
     alert: GenericAlert,
-    background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_tenant_from_api_key),
 ):
     """
@@ -112,7 +111,7 @@ async def receive_generic_alert(
     )
 
     alert.tenant_id = tenant_id
-    background_tasks.add_task(process_alert, alert)
+    process_alert_task.delay(alert.model_dump())
 
     return {
         "status": "accepted",
@@ -122,7 +121,6 @@ async def receive_generic_alert(
 
 @router.post("/test")
 async def send_test_alert(
-    background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_current_tenant),
 ):
     """
@@ -152,7 +150,7 @@ async def send_test_alert(
         },
     )
 
-    background_tasks.add_task(process_alert, test_alert)
+    process_alert_task.delay(test_alert.model_dump())
 
     return {
         "status": "accepted",

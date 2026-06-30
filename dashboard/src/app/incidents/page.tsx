@@ -7,6 +7,7 @@ import {
   ChevronDown, Zap, AlertTriangle, CheckCircle, XCircle, Eye
 } from "lucide-react";
 import { fetchIncidents, IncidentListItem, sendTestAlert } from "@/lib/api";
+import { useIncidentStream } from "@/hooks/useIncidentStream";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   detected: { label: "Detected", color: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20", icon: <AlertTriangle size={12} /> },
@@ -58,10 +59,32 @@ export default function IncidentsPage() {
 
   useEffect(() => {
     loadIncidents();
-    // Poll every 10 seconds
+    // Poll every 10 seconds as a fallback to the live WebSocket stream.
     const interval = setInterval(loadIncidents, 10000);
     return () => clearInterval(interval);
   }, [loadIncidents]);
+
+  // Live updates: patch the matching row in place; if we get an update for an
+  // incident we haven't loaded yet (e.g. a brand-new one), refetch the list.
+  const { connected: liveConnected } = useIncidentStream(
+    useCallback((update) => {
+      setIncidents((prev) => {
+        const idx = prev.findIndex((inc) => inc.id === update.id);
+        if (idx === -1) {
+          loadIncidents();
+          return prev;
+        }
+        const next = [...prev];
+        next[idx] = {
+          ...next[idx],
+          ...(update.status ? { status: update.status } : {}),
+          ...(update.severity ? { severity: update.severity } : {}),
+          ...(update.title ? { title: update.title } : {}),
+        };
+        return next;
+      });
+    }, [loadIncidents])
+  );
 
   const filteredIncidents = incidents.filter((inc) =>
     !searchQuery || inc.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -111,6 +134,19 @@ export default function IncidentsPage() {
             </div>
             <span className="text-sm text-zinc-500">
               {filteredIncidents.length} incident{filteredIncidents.length !== 1 ? "s" : ""}
+            </span>
+            <span
+              className="flex items-center gap-1.5 text-xs text-zinc-500"
+              title={liveConnected ? "Live updates connected" : "Reconnecting…"}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  liveConnected
+                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                    : "bg-zinc-600"
+                }`}
+              ></span>
+              {liveConnected ? "Live" : "Offline"}
             </span>
           </div>
           <button

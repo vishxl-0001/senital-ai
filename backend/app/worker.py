@@ -27,7 +27,44 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=300,  # 5 min max per task
     task_soft_time_limit=240,  # Soft limit at 4 min
+    # Durability: if a worker dies mid-task the message is redelivered instead
+    # of acked-on-receipt, so an investigation is never silently lost on restart.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
 )
+
+
+@celery_app.task(
+    name="process_alert_task",
+    bind=True,
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=3,
+)
+def process_alert_task(self, alert_data: dict):
+    """
+    Run the full investigation pipeline for one alert as a durable Celery task.
+
+    Previously this ran via FastAPI BackgroundTasks in the web process: a restart
+    mid-investigation killed it with no retry, and an alert burst spawned unbounded
+    coroutines in one process. As a Celery task it survives restarts (acks_late)
+    retries transient failures, and is bounded by worker concurrency.
+
+    `alert_data` is the JSON-serialized GenericAlert (process_alert manages its
+    own DB session internally, mirroring execute_fix_task).
+    """
+    log.info(f"🚀 Celery started investigation for alert: {alert_data.get('title')}")
+
+    async def _run():
+        from app.api.alerts import GenericAlert
+        from app.agents.orchestrator import process_alert
+
+        alert = GenericAlert(**alert_data)
+        await process_alert(alert)
+
+    asyncio.run(_run())
 
 
 @celery_app.task(name="execute_fix_task")
