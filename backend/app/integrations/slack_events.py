@@ -69,7 +69,9 @@ async def slack_interactions(request: Request):
 
     if action_type == "block_actions":
         actions = payload.get("actions", [])
-        user = payload.get("user", {}).get("username", "unknown")
+        user_obj = payload.get("user", {})
+        user_id = user_obj.get("id", "")
+        user_name = user_obj.get("username") or user_obj.get("name") or "unknown"
 
         for action in actions:
             action_id = action.get("action_id")
@@ -79,26 +81,40 @@ async def slack_interactions(request: Request):
             log.info(
                 "🔘 Slack button clicked",
                 action=action_id,
-                user=user,
+                user=user_name,
+                user_id=user_id,
                 incident_id=incident_id,
             )
 
             if action_id == "approve_fix":
-                await _handle_approve(incident_id, user, payload)
+                await _handle_approve(incident_id, user_id, user_name, payload)
             elif action_id == "reject_fix":
-                await _handle_reject(incident_id, user, payload)
+                await _handle_reject(incident_id, user_name, payload)
 
     return Response(status_code=200)
 
 
-async def _handle_approve(incident_id: str, user: str, payload: dict):
-    """Handle fix approval from Slack."""
+def is_authorized_approver(approver_ids, slack_user_id: str) -> bool:
+    """
+    Authorize a Slack approver. Fails CLOSED: if no allow-list is configured
+    (None/empty) or the clicker isn't on it, approval is denied. Approvals can
+    still be made via the Clerk-authenticated dashboard.
+    """
+    if not approver_ids or not slack_user_id:
+        return False
+    return slack_user_id in set(approver_ids)
+
+
+async def _handle_approve(incident_id: str, user_id: str, user_name: str, payload: dict):
+    """Handle fix approval from Slack — authorized, tenant-scoped, fail-closed."""
     from app.db.database import async_session
     from sqlalchemy import select
     from app.models.incident import Incident, IncidentStatus
+    from app.models.tenant import Tenant
     from app.worker import execute_fix_task
+    from app.integrations.slack_bot import send_slack_notification
 
-    log.info(f"✅ Fix approved by {user} for incident {incident_id}")
+    channel = payload.get("channel", {}).get("id", "#incidents")
 
     async with async_session() as db:
         result = await db.execute(
@@ -110,6 +126,30 @@ async def _handle_approve(incident_id: str, user: str, payload: dict):
             log.error(f"Incident {incident_id} not found")
             return
 
+        # Authorize the clicker against the incident-owning tenant's allow-list.
+        tenant = None
+        if incident.tenant_id:
+            tenant = (
+                await db.execute(select(Tenant).where(Tenant.id == incident.tenant_id))
+            ).scalar_one_or_none()
+
+        approver_ids = tenant.slack_approver_ids if tenant else None
+        if not is_authorized_approver(approver_ids, user_id):
+            log.warning(
+                "🚫 Unauthorized Slack approval attempt — denied (fail-closed)",
+                incident_id=incident_id,
+                user=user_name,
+                user_id=user_id,
+                tenant_id=incident.tenant_id,
+            )
+            await send_slack_notification(
+                channel,
+                f"🚫 <@{user_id or user_name}> is not authorized to approve fixes "
+                f"for incident `{incident_id}`. Ask an approved approver, or approve "
+                f"from the Sentinel dashboard.",
+            )
+            return
+
         if incident.status != IncidentStatus.FIX_PROPOSED:
             log.warning(f"Incident {incident_id} is in {incident.status.value}, cannot approve")
             return
@@ -118,15 +158,14 @@ async def _handle_approve(incident_id: str, user: str, payload: dict):
         incident.fix_approval = "manual"
         await db.commit()
 
+    log.info(f"✅ Fix approved by {user_name} ({user_id}) for incident {incident_id}")
+
     # Trigger fix execution via Celery
     execute_fix_task.delay(incident_id)
 
-    # Update the Slack message to show it was approved
-    from app.integrations.slack_bot import send_slack_notification
-    channel = payload.get("channel", {}).get("id", "#incidents")
     await send_slack_notification(
         channel,
-        f"✅ *Fix approved* by <@{user}> for incident `{incident_id}`. Executing now..."
+        f"✅ *Fix approved* by <@{user_id or user_name}> for incident `{incident_id}`. Executing now...",
     )
 
 

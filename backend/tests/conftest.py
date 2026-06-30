@@ -91,8 +91,8 @@ async def db_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
-            text("TRUNCATE incidents, incident_timeline, policies, runbooks "
-                 "RESTART IDENTITY CASCADE")
+            text("TRUNCATE incidents, incident_timeline, policies, runbooks, "
+                 "tenants, api_keys RESTART IDENTITY CASCADE")
         )
     yield engine
     await engine.dispose()
@@ -105,6 +105,26 @@ async def db_session(db_engine):
     maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with maker() as session:
         yield session
+
+
+@pytest_asyncio.fixture
+async def app_session_maker(db_engine, monkeypatch):
+    """
+    Point app.db.database.async_session at the per-test engine.
+
+    Code under test (e.g. Slack handlers, Celery task bodies) opens its own
+    ``async_session()`` against the module-level engine, which is bound to the
+    event loop alive at import time. pytest-asyncio runs each test on a fresh
+    loop, and asyncpg connections are loop-bound — so without this, the second
+    DB-touching test reusing that engine hits "another operation is in progress".
+    Rebinding to db_engine (created on the current test's loop) avoids that.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    import app.db.database as database
+
+    maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session", maker)
+    return maker
 
 
 # ── Auth: self-signed Clerk-style tokens + matching verifier ───────────────
