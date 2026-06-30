@@ -91,8 +91,13 @@ async def process_alert(alert):
 
             # ── Step 2: Create Incident ──
             fingerprint = generate_fingerprint(alert)
+            # Allocate a per-tenant incident number (atomic; creates the tenant
+            # row on first use). Sequential within the tenant, not global.
+            from app.engine.numbering import allocate_incident_number
+            incident_number = await allocate_incident_number(db, alert.tenant_id)
             incident = Incident(
                 tenant_id=alert.tenant_id,
+                incident_number=incident_number,
                 title=alert.title,
                 source=alert.source,
                 source_alert_id=fingerprint,

@@ -49,6 +49,27 @@ docker-compose up -d
 # 4. Dashboard running at http://localhost:3000
 ```
 
+## Database migrations (Alembic)
+
+The schema is owned by **Alembic** (`backend/alembic/`), not by app startup.
+`docker-compose up` applies migrations automatically: the backend container runs
+`python scripts/db_migrate.py` before launching uvicorn. That script:
+
+- on a **fresh** database, creates the full schema (`alembic upgrade head`);
+- on a **pre-Alembic** database (created by the old `init_db()` DDL), stamps the
+  baseline `0001_baseline`, then applies later revisions — preserving existing data;
+- on an **up-to-date** database, is a no-op.
+
+**Deploy step (required):** run migrations before/at deploy, from `backend/`:
+
+```bash
+alembic upgrade head        # or: python scripts/db_migrate.py
+```
+
+Run it from exactly **one** process (not every replica) to avoid concurrent DDL.
+`init_db()` no longer issues DDL — it only logs.
+
+
 ## Tech Stack
 
 - **Backend:** Python 3.11 + FastAPI

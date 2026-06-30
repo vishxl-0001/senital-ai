@@ -46,6 +46,7 @@ async def _seed(db_session, tenant_id, approver_ids):
     db_session.add(Tenant(id=tenant_id, name="ACME", slack_approver_ids=approver_ids))
     inc = Incident(
         tenant_id=tenant_id, title="needs approval", source="test",
+        incident_number=1,
         status=IncidentStatus.FIX_PROPOSED, severity=Severity.HIGH,
     )
     db_session.add(inc)

@@ -89,11 +89,10 @@ async def db_engine():
 
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
+        # drop_all + create_all so model/schema changes always take effect
+        # (create_all alone won't ALTER an existing table from a prior run).
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            text("TRUNCATE incidents, incident_timeline, policies, runbooks, "
-                 "tenants, api_keys RESTART IDENTITY CASCADE")
-        )
     yield engine
     await engine.dispose()
 

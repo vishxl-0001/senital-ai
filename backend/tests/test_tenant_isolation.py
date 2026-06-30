@@ -21,10 +21,16 @@ from app.models.incident import Incident, IncidentStatus, Severity
 ORG_A = "org_AAAAAAAAAAAAAAAAAAAAAAA"
 ORG_B = "org_BBBBBBBBBBBBBBBBBBBBBBB"
 
+# Per-tenant incident number counters so seeded rows satisfy the
+# (tenant_id, incident_number) unique constraint.
+_counters: dict = {}
+
 
 async def _seed_incident(db_session, tenant_id: str, title: str) -> str:
+    _counters[tenant_id] = _counters.get(tenant_id, 0) + 1
     inc = Incident(
         tenant_id=tenant_id,
+        incident_number=_counters[tenant_id],
         title=title,
         source="test",
         status=IncidentStatus.FIX_PROPOSED,

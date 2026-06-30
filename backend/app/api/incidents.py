@@ -12,6 +12,7 @@ from uuid import UUID
 from app.db.database import get_db
 from app.models.incident import Incident, IncidentStatus
 from app.auth.clerk import get_current_tenant
+from app.engine.numbering import get_tenant_slug, format_reference
 
 router = APIRouter()
 
@@ -40,11 +41,14 @@ async def list_incidents(
     result = await db.execute(query)
     incidents = result.scalars().all()
 
+    slug = await get_tenant_slug(db, tenant_id)
+
     return {
         "incidents": [
             {
                 "id": str(inc.id),
                 "incident_number": inc.incident_number,
+                "incident_reference": format_reference(slug, tenant_id, inc.incident_number),
                 "title": inc.title,
                 "status": inc.status.value if inc.status else None,
                 "severity": inc.severity.value if inc.severity else None,
@@ -82,9 +86,12 @@ async def get_incident(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
 
+    slug = await get_tenant_slug(db, tenant_id)
+
     return {
         "id": str(incident.id),
         "incident_number": incident.incident_number,
+        "incident_reference": format_reference(slug, tenant_id, incident.incident_number),
         "title": incident.title,
         "status": incident.status.value if incident.status else None,
         "severity": incident.severity.value if incident.severity else None,

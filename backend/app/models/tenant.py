@@ -4,7 +4,7 @@ Sentinel AI — Tenant & API Key Models
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, JSON, func
+from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, Boolean, JSON, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -28,6 +28,12 @@ class Tenant(Base):
 
     id = Column(String(255), primary_key=True)  # Clerk org_id == tenant_id
     name = Column(String(255), nullable=True)
+
+    # Per-tenant incident numbering (item 11). `slug` prefixes the human
+    # reference (e.g. ACME-1042); `incident_counter` is the last allocated
+    # number, incremented atomically when an incident is created.
+    slug = Column(String(32), nullable=True, unique=True, index=True)
+    incident_counter = Column(Integer, nullable=False, default=0, server_default="0")
 
     # Slack approval authorization (Phase 2, item 9)
     slack_approver_ids = Column(JSON, nullable=True)  # list[str] of Slack user IDs

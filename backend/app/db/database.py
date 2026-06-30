@@ -5,8 +5,11 @@ Async SQLAlchemy engine and session management.
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+import structlog
 
 from app.config import settings
+
+log = structlog.get_logger()
 
 
 # ── Engine ──
@@ -30,38 +33,23 @@ class Base(DeclarativeBase):
     pass
 
 
-# ── Init DB (create tables + migrations) ──
+# ── Schema management ──
+# Schema is owned by Alembic migrations (backend/alembic). Run
+# `alembic upgrade head` as a deploy step — NOT create_all / ad-hoc DDL on
+# startup, which races across replicas and has no rollback history.
 async def init_db():
-    """Create all tables on startup and run necessary migrations."""
-    from sqlalchemy import text
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-        await conn.run_sync(Base.metadata.create_all)
+    """
+    No-op kept for backwards-compatible startup imports.
 
-        # Migration: update rca_embedding dimension from 1536 → 384 if needed
-        try:
-            result = await conn.execute(text("""
-                SELECT atttypmod FROM pg_attribute
-                JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
-                WHERE pg_class.relname = 'incidents'
-                AND pg_attribute.attname = 'rca_embedding'
-                AND pg_attribute.atttypmod > 0;
-            """))
-            row = result.fetchone()
-            if row and row[0] != 384:
-                # Clear stale embeddings (wrong dimension) and alter column
-                await conn.execute(text("UPDATE incidents SET rca_embedding = NULL WHERE rca_embedding IS NOT NULL;"))
-                await conn.execute(text("ALTER TABLE incidents ALTER COLUMN rca_embedding TYPE vector(384);"))
-        except Exception:
-            pass  # Table might not exist yet on first run
-            
-        # Migration: Add tenant_id to tables if it doesn't exist
-        for table in ["incidents", "incident_timeline", "policies", "runbooks"]:
-            try:
-                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255);"))
-                await conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id ON {table} (tenant_id);"))
-            except Exception as e:
-                pass
+    Previously this ran Base.metadata.create_all plus ad-hoc
+    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on every boot. That is unsafe
+    with multiple replicas (concurrent DDL) and leaves no migration history.
+    Apply schema with `alembic upgrade head` before/at deploy instead.
+    """
+    log.info(
+        "init_db is a no-op — schema is managed by Alembic. "
+        "Run 'alembic upgrade head' to apply migrations."
+    )
 
 
 # ── Dependency: Get DB Session ──

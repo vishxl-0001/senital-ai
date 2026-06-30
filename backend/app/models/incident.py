@@ -9,7 +9,7 @@ from enum import Enum as PyEnum
 
 from sqlalchemy import (
     Column, String, Text, DateTime, Integer, Float,
-    JSON, Enum, ForeignKey, Boolean, func
+    JSON, Enum, ForeignKey, Boolean, UniqueConstraint, func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -52,10 +52,15 @@ class FixApproval(str, PyEnum):
 class Incident(Base):
     """Core incident record — tracks the full lifecycle."""
     __tablename__ = "incidents"
+    # incident_number is sequential PER TENANT (not global), so absolute numbers
+    # don't leak platform-wide incident volume.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "incident_number", name="uq_incidents_tenant_number"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String(255), index=True, nullable=True)  # Links to Clerk Organization ID
-    incident_number = Column(Integer, unique=True, autoincrement=True, index=True)
+    tenant_id = Column(String(255), index=True, nullable=False)  # Clerk Organization ID
+    incident_number = Column(Integer, index=True, nullable=False)  # per-tenant; allocated in orchestrator
     title = Column(String(500), nullable=False)
     status = Column(Enum(IncidentStatus), default=IncidentStatus.DETECTED, index=True)
     severity = Column(Enum(Severity), default=Severity.MEDIUM, index=True)
@@ -112,7 +117,7 @@ class IncidentTimeline(Base):
     __tablename__ = "incident_timeline"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String(255), index=True, nullable=True)
+    tenant_id = Column(String(255), index=True, nullable=False)
     incident_id = Column(UUID(as_uuid=True), ForeignKey("incidents.id"), nullable=False, index=True)
     timestamp = Column(DateTime, default=func.now())
     event_type = Column(String(50))  # "alert", "investigation", "rca", "fix", "rollback"
@@ -130,7 +135,7 @@ class Policy(Base):
     __tablename__ = "policies"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String(255), index=True, nullable=True)
+    tenant_id = Column(String(255), index=True, nullable=False)
     name = Column(String(200), nullable=False)
     description = Column(Text)
     action_type = Column(String(100), nullable=False)  # "restart_pod", "rollback", "scale", etc.
@@ -148,7 +153,7 @@ class Runbook(Base):
     __tablename__ = "runbooks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String(255), index=True, nullable=True)
+    tenant_id = Column(String(255), index=True, nullable=False)
     name = Column(String(200), nullable=False)
     description = Column(Text)
     trigger_pattern = Column(String(500))  # Pattern that matches RCA to this runbook

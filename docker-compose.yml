@@ -53,7 +53,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "python scripts/db_migrate.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # ── Celery Worker (Async Tasks) ──
   celery-worker:
