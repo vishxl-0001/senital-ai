@@ -5,7 +5,7 @@ Agents poll for fixes to execute, and report back results.
 """
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -14,6 +14,7 @@ from app.db.database import get_db
 from app.models.incident import Incident, IncidentStatus
 from app.api.auth import get_tenant_from_api_key
 from app.engine.k8s_actions import build_structured_action
+from app.rate_limit import limiter, AGENT_LIMIT
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -24,7 +25,9 @@ class FixReport(BaseModel):
     output: str
 
 @router.get("/pending-fixes")
+@limiter.limit(AGENT_LIMIT)
 async def get_pending_fixes(
+    request: Request,
     tenant_id: str = Depends(get_tenant_from_api_key),
     db: AsyncSession = Depends(get_db)
 ):
@@ -63,7 +66,9 @@ async def get_pending_fixes(
 
 
 @router.post("/report-fix")
+@limiter.limit(AGENT_LIMIT)
 async def report_fix_result(
+    request: Request,
     report: FixReport,
     tenant_id: str = Depends(get_tenant_from_api_key),
     db: AsyncSession = Depends(get_db)

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, Response
 from slack_sdk.signature import SignatureVerifier
 
 from app.config import settings
+from app.rate_limit import limiter, SLACK_LIMIT
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -25,6 +26,7 @@ def get_verifier():
 
 
 @router.post("/events")
+@limiter.limit(SLACK_LIMIT)
 async def slack_events(request: Request):
     """Handle Slack Events API (url_verification + event callbacks)."""
     body = await request.body()
@@ -57,6 +59,7 @@ async def slack_events(request: Request):
 
 
 @router.post("/interactions")
+@limiter.limit(SLACK_LIMIT)
 async def slack_interactions(request: Request):
     """
     Handle Slack interactive components — button clicks (Approve/Reject).

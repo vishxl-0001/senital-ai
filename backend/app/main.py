@@ -49,6 +49,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate limiting (item 17) ──
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from app.rate_limit import limiter
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # ── CORS (allow dashboard to connect) ──
 app.add_middleware(
     CORSMiddleware,

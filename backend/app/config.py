@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     PROMETHEUS_URL: str | None = None
     PROMETHEUS_ALLOW_MOCK: bool = False
 
+    # Rate limiting (item 17) — per-caller (API key, else client IP). Values are
+    # slowapi limit strings; override via env for your production tier.
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_WEBHOOK: str = "60/minute"   # alert ingestion webhooks + /test
+    RATE_LIMIT_AGENT: str = "120/minute"    # sentinel-agent poll + report
+    RATE_LIMIT_SLACK: str = "30/minute"     # Slack events + interactions
+
     class Config:
         env_file = ".env"
         case_sensitive = True

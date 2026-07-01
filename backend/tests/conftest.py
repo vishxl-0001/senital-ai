@@ -41,6 +41,10 @@ TEST_DATABASE_URL = (
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["APP_ENV"] = "test"
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
+# Disable rate limiting in the suite: the slowapi decorator becomes a passthrough,
+# so endpoint coroutines can be called directly and repeated calls don't 429.
+# Dedicated 429 behavior is covered by test_rate_limit.py with its own limiter.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 TEST_ISSUER = "https://test.clerk.local"
 TEST_KID = "test-kid"

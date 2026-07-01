@@ -35,7 +35,7 @@ async def test_generic_webhook_enqueues_task(monkeypatch):
     monkeypatch.setattr(alerts_mod, "process_alert_task", spy)
 
     alert = alerts_mod.GenericAlert(source="datadog", title="disk full")
-    resp = await alerts_mod.receive_generic_alert(alert, tenant_id="org_X")
+    resp = await alerts_mod.receive_generic_alert(request=None, alert=alert, tenant_id="org_X")
 
     assert resp["status"] == "accepted"
     assert len(spy.calls) == 1
@@ -49,7 +49,7 @@ async def test_test_endpoint_enqueues_task(monkeypatch):
     spy = _DelaySpy()
     monkeypatch.setattr(alerts_mod, "process_alert_task", spy)
 
-    resp = await alerts_mod.send_test_alert(tenant_id="org_Y")
+    resp = await alerts_mod.send_test_alert(request=None, tenant_id="org_Y")
 
     assert resp["status"] == "accepted"
     assert len(spy.calls) == 1

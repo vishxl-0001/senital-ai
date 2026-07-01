@@ -13,6 +13,7 @@ import structlog
 from app.worker import process_alert_task
 from app.api.auth import get_tenant_from_api_key
 from app.auth.clerk import get_current_tenant
+from app.rate_limit import limiter, WEBHOOK_LIMIT
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -54,7 +55,9 @@ class GenericAlert(BaseModel):
 # ── Routes ──
 
 @router.post("/webhook/prometheus")
+@limiter.limit(WEBHOOK_LIMIT)
 async def receive_prometheus_alert(
+    request: Request,
     payload: AlertManagerPayload,
     tenant_id: str = Depends(get_tenant_from_api_key),
 ):
@@ -95,7 +98,9 @@ async def receive_prometheus_alert(
 
 
 @router.post("/webhook/generic")
+@limiter.limit(WEBHOOK_LIMIT)
 async def receive_generic_alert(
+    request: Request,
     alert: GenericAlert,
     tenant_id: str = Depends(get_tenant_from_api_key),
 ):
@@ -120,7 +125,9 @@ async def receive_generic_alert(
 
 
 @router.post("/test")
+@limiter.limit(WEBHOOK_LIMIT)
 async def send_test_alert(
+    request: Request,
     tenant_id: str = Depends(get_current_tenant),
 ):
     """
