@@ -160,8 +160,8 @@ async def _handle_approve(incident_id: str, user_id: str, user_name: str, payloa
 
     log.info(f"✅ Fix approved by {user_name} ({user_id}) for incident {incident_id}")
 
-    # Trigger fix execution via Celery
-    execute_fix_task.delay(incident_id)
+    # Trigger fix execution via Celery (approved from Slack by user_id).
+    execute_fix_task.delay(incident_id, approval_source="slack", approver_id=user_id)
 
     await send_slack_notification(
         channel,

@@ -126,6 +126,31 @@ async def app_session_maker(db_engine, monkeypatch):
     return maker
 
 
+@pytest_asyncio.fixture
+async def app_session_nullpool(db_engine, monkeypatch):
+    """
+    Like app_session_maker, but backed by a NullPool engine.
+
+    For code under test that runs its own event loop (Celery task bodies call
+    asyncio.run internally). Such tasks must be driven via asyncio.to_thread so
+    their loop is separate from the test's. A pooled engine would reuse a
+    connection across those loops (asyncpg forbids that); NullPool opens and
+    closes a fresh connection per session, so each loop gets its own.
+    db_engine is requested first purely to (re)create the schema.
+    """
+    from sqlalchemy.pool import NullPool
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession, async_sessionmaker, create_async_engine,
+    )
+    import app.db.database as database
+
+    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(database, "async_session", maker)
+    yield maker
+    await engine.dispose()
+
+
 # ── Auth: self-signed Clerk-style tokens + matching verifier ───────────────
 
 @pytest.fixture(scope="session")

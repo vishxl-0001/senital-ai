@@ -68,35 +68,55 @@ def process_alert_task(self, alert_data: dict):
 
 
 @celery_app.task(name="execute_fix_task")
-def execute_fix_task(incident_id: str):
+def execute_fix_task(incident_id: str, approval_source: str = "unknown", approver_id: str = None):
     """
     Celery task to execute a fix in the background.
     Since executor is async, we run it in an asyncio loop.
+
+    approval_source records HOW the fix was authorized ("slack" | "dashboard" |
+    "auto") and approver_id who authorized it — both written to the audit log.
     """
     log.info(f"🚀 Celery started fix execution for incident {incident_id}")
-    
+
     async def _run():
         from app.db.database import async_session
         from sqlalchemy import select
         from app.models.incident import Incident, IncidentStatus
         from app.engine.executor import execute_fix
+        from app.engine.audit import record_audit
         from app.integrations.slack_bot import send_incident_to_slack
-        
+
         async with async_session() as db:
             result = await db.execute(
                 select(Incident).where(Incident.id == incident_id)
             )
             incident = result.scalar_one_or_none()
-            
+
             if not incident or incident.status != IncidentStatus.FIX_APPROVED:
                 log.error(f"Cannot execute fix for {incident_id} - invalid state or not found.")
                 return
-            
+
+            tenant_id = incident.tenant_id
+            status_before = incident.status.value
+
+            # Audit the approved execution (human-authorized) before mutating infra.
+            await record_audit(
+                tenant_id=tenant_id,
+                actor="human",
+                actor_id=approver_id,
+                action="execute_fix",
+                target_type="incident",
+                target_id=incident_id,
+                before_state={"status": status_before, "fix_type": incident.fix_type},
+                after_state=None,
+                approval_source=approval_source,
+            )
+
             incident.status = IncidentStatus.FIX_EXECUTING
             incident.fix_started_at = datetime.utcnow()
             await db.commit()
-            
-            fix_result = await execute_fix(incident.fix_plan, incident_id=incident_id)
+
+            fix_result = await execute_fix(incident.fix_plan, incident_id=incident_id, tenant_id=tenant_id)
             incident.fix_result = fix_result
             
             if fix_result["status"] == "success":
@@ -106,9 +126,23 @@ def execute_fix_task(incident_id: str):
                     incident.mttr_seconds = (incident.resolved_at - incident.detected_at).seconds
             else:
                 incident.status = IncidentStatus.FAILED
-            
+
             await db.commit()
-            
+
+            # Audit the execution outcome (AI actor performed the remediation).
+            await record_audit(
+                tenant_id=tenant_id,
+                actor="ai",
+                action="fix_execution_result",
+                target_type="incident",
+                target_id=incident_id,
+                before_state={"status": status_before},
+                after_state={"status": incident.status.value,
+                             "result": fix_result.get("status"),
+                             "needs_rollback": fix_result.get("needs_rollback")},
+                approval_source=approval_source,
+            )
+
             incident_data = {
                 "id": str(incident.id),
                 "title": incident.title,

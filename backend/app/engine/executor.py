@@ -35,14 +35,19 @@ def _get_k8s_clients():
         return None, None
 
 
-async def execute_fix(fix_plan: dict, incident_id: str = None) -> dict:
+async def execute_fix(fix_plan: dict, incident_id: str = None, tenant_id: str = None) -> dict:
     """
     Execute a fix plan against the target infrastructure.
-    
+
     1. Detects if K8s is available → real mode, else simulation
     2. Executes each step in order
     3. Stops and flags for rollback on any step failure
+
+    Each executed step is recorded to the audit log as an AI-actor action
+    (item 16) when tenant_id is provided.
     """
+    from app.engine.audit import record_audit
+
     fix_type = fix_plan.get("fix_type", "unknown")
     steps = fix_plan.get("steps", [])
 
@@ -81,6 +86,20 @@ async def execute_fix(fix_plan: dict, incident_id: str = None) -> dict:
             "real_execution": is_real_mode,
             "executed_at": datetime.utcnow().isoformat(),
         })
+
+        # Audit each mutation attempt (AI actor). before = intended action,
+        # after = result. Only when we know the tenant.
+        if tenant_id:
+            await record_audit(
+                tenant_id=tenant_id,
+                actor="ai",
+                action=f"execute_step:{fix_type}",
+                target_type="incident",
+                target_id=incident_id,
+                before_state={"step": step_num, "action": action, "command": command,
+                              "real_execution": is_real_mode},
+                after_state={"status": step_result["status"], "output": step_result["output"]},
+            )
 
         # If a step fails, stop and trigger rollback
         if step_result["status"] == "failed":

@@ -148,9 +148,9 @@ async def approve_fix(
     incident.fix_approval = "manual"
     await db.commit()
 
-    # Trigger fix execution via Celery task
+    # Trigger fix execution via Celery task (approved from the dashboard).
     from app.worker import execute_fix_task
-    execute_fix_task.delay(str(incident.id))
+    execute_fix_task.delay(str(incident.id), approval_source="dashboard")
 
     return {
         "status": "approved",
