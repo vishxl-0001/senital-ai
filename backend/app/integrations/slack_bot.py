@@ -17,11 +17,50 @@ _client = None
 
 
 def get_slack_client() -> AsyncWebClient:
-    """Get or create the Slack client singleton."""
+    """Get or create the global Slack client singleton (fallback / single-workspace)."""
     global _client
     if _client is None and settings.SLACK_BOT_TOKEN:
         _client = AsyncWebClient(token=settings.SLACK_BOT_TOKEN)
     return _client
+
+
+async def get_tenant_slack(tenant_id: str):
+    """
+    Resolve a (client, channel) pair for a tenant (item 13).
+
+    Prefers the tenant's own OAuth-installed bot token + configured channel
+    (decrypted from the tenants table). Falls back to the global bot token and
+    "#incidents" when the tenant hasn't installed. Returns (None, channel) if no
+    token is available anywhere, so callers can log-only.
+    """
+    from sqlalchemy import select
+    from app.db.database import async_session
+    from app.models.tenant import Tenant
+    from app.integrations.slack_crypto import decrypt_token, SlackTokenCryptoError
+
+    client = None
+    channel = "#incidents"
+
+    if tenant_id:
+        try:
+            async with async_session() as db:
+                tenant = (await db.execute(
+                    select(Tenant).where(Tenant.id == tenant_id)
+                )).scalar_one_or_none()
+            if tenant:
+                if tenant.slack_channel_id:
+                    channel = tenant.slack_channel_id
+                if tenant.slack_bot_token:
+                    try:
+                        client = AsyncWebClient(token=decrypt_token(tenant.slack_bot_token))
+                    except SlackTokenCryptoError as e:
+                        log.error("Could not decrypt tenant Slack token", tenant_id=tenant_id, error=str(e))
+        except Exception as e:
+            log.error("Failed to resolve tenant Slack client", tenant_id=tenant_id, error=str(e))
+
+    if client is None:
+        client = get_slack_client()  # global fallback
+    return client, channel
 
 
 # ── Build Slack Block Messages ──
@@ -138,15 +177,24 @@ def build_incident_blocks(incident_data: dict, is_resolved: bool = False) -> lis
 
 async def send_incident_to_slack(
     incident_data: dict,
-    channel: str = "#incidents",
+    channel: str = None,
     is_resolved: bool = False,
+    tenant_id: str = None,
 ) -> dict:
     """
     Send a formatted incident report to Slack.
-    Falls back to logging if Slack is not configured.
+
+    When tenant_id is given, routes via that tenant's OAuth-installed bot token
+    and configured channel (item 13); otherwise uses the global client. Falls
+    back to logging if Slack is not configured.
     """
     blocks = build_incident_blocks(incident_data, is_resolved=is_resolved)
-    client = get_slack_client()
+    if tenant_id is not None:
+        client, resolved_channel = await get_tenant_slack(tenant_id)
+        channel = channel or resolved_channel
+    else:
+        client = get_slack_client()
+        channel = channel or "#incidents"
 
     if not client:
         # No Slack token configured — log the message instead
@@ -197,9 +245,13 @@ async def update_slack_message(channel: str, ts: str, incident_data: dict, is_re
         log.error("❌ Failed to update Slack message", error=str(e))
 
 
-async def send_slack_notification(channel: str, text: str):
-    """Send a simple text message to Slack."""
-    client = get_slack_client()
+async def send_slack_notification(channel: str, text: str, tenant_id: str = None):
+    """Send a simple text message to Slack (per-tenant when tenant_id is given)."""
+    if tenant_id is not None:
+        client, resolved_channel = await get_tenant_slack(tenant_id)
+        channel = channel or resolved_channel
+    else:
+        client = get_slack_client()
     if not client:
         log.info(f"📨 [Slack not configured] {text}")
         return

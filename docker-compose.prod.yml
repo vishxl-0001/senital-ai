@@ -103,6 +103,31 @@ services:
     mem_limit: 448m
     cpus: 0.5
 
+  # ── Postgres backup sidecar (item 18) ── daily pg_dump, gzip, prune, off-box
+  postgres-backup:
+    image: pgvector/pgvector:pg16   # ships pg_dump matching the server version
+    container_name: sentinel-postgres-backup
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel_ai}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      # Optional off-box upload — set both to push dumps to Azure Blob Storage:
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+      AZURE_BACKUP_CONTAINER: ${AZURE_BACKUP_CONTAINER:-}
+    volumes:
+      - ./backend/scripts/backup_postgres.sh:/usr/local/bin/backup_postgres.sh:ro
+      - postgres_backups:/backups
+    entrypoint: ["sh", "-c", "while true; do /usr/local/bin/backup_postgres.sh || echo '[backup] FAILED'; sleep \"${BACKUP_INTERVAL_SECONDS:-86400}\"; done"]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.2
+
   # ── Next.js Dashboard (Frontend) ──
   dashboard:
     build:
@@ -127,3 +152,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  postgres_backups:

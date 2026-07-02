@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     # Per-tenant Slack OAuth (item 13) — populated once the Slack App exists.
     SLACK_CLIENT_ID: str | None = None
     SLACK_CLIENT_SECRET: str | None = None
+    # Fernet key used to encrypt per-tenant Slack bot tokens at rest.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    SLACK_TOKEN_ENCRYPTION_KEY: str | None = None
+    # Slack bot scopes requested during OAuth install.
+    SLACK_OAUTH_SCOPES: str = "chat:write,chat:write.public"
+
+    # Base URL of the backend (public), used to build the Slack OAuth redirect URI.
+    BACKEND_BASE_URL: str = "http://localhost:8000"
 
     # Base URL of the dashboard, used to build incident links in Slack messages.
     # Configurable so it isn't hardcoded to localhost in production.

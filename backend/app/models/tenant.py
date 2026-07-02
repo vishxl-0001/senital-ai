@@ -38,9 +38,12 @@ class Tenant(Base):
     # Slack approval authorization (Phase 2, item 9)
     slack_approver_ids = Column(JSON, nullable=True)  # list[str] of Slack user IDs
 
-    # Per-tenant Slack routing — populated in Phase 4 (item 13)
+    # Per-tenant Slack routing — populated in Phase 4 (item 13) via OAuth install.
     slack_team_id = Column(String(64), nullable=True, index=True)
     slack_channel_id = Column(String(64), nullable=True)
+    # Fernet-encrypted bot token (xoxb-...) for this tenant's workspace. Encrypted
+    # at rest via app.integrations.slack_crypto; NULL until the tenant installs.
+    slack_bot_token = Column(String(500), nullable=True)
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

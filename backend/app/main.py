@@ -14,6 +14,7 @@ from app.config import settings
 from app.db.database import init_db
 from app.api import alerts, incidents, policies, health, websockets, auth, agent
 from app.integrations.slack_events import router as slack_router
+from app.integrations.slack_oauth import router as slack_oauth_router
 
 # ── Structured Logging ──
 structlog.configure(
@@ -74,6 +75,7 @@ app.include_router(incidents.router, prefix="/api/v1/incidents", tags=["Incident
 app.include_router(policies.router, prefix="/api/v1/policies", tags=["Policies"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["Agent"])
 app.include_router(slack_router, prefix="/api/v1/slack", tags=["Slack"])
+app.include_router(slack_oauth_router, prefix="/api/v1/slack", tags=["Slack"])
 app.include_router(websockets.router, tags=["WebSockets"])
 
 

@@ -70,6 +70,42 @@ Run it from exactly **one** process (not every replica) to avoid concurrent DDL.
 `init_db()` no longer issues DDL — it only logs.
 
 
+## Production deployment
+
+Use the separate production compose file:
+
+```bash
+# .env must set POSTGRES_PASSWORD and REDIS_PASSWORD (compose refuses to start otherwise)
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+vs. dev, prod: runs the built image (no bind-mount / `--reload`), uvicorn with
+multiple workers, **does not** publish Postgres/Redis to the host (internal
+network only), password-protects Redis, and sets per-service `mem_limit`/`cpus`
+sized for a small VM.
+
+### Backups (Postgres)
+
+A `postgres-backup` sidecar runs `backend/scripts/backup_postgres.sh` on a schedule
+(`BACKUP_INTERVAL_SECONDS`, default daily): `pg_dump | gzip` into the
+`postgres_backups` volume, pruning dumps older than `BACKUP_RETENTION_DAYS`
+(default 7). Set `AZURE_STORAGE_CONNECTION_STRING` + `AZURE_BACKUP_CONTAINER` to
+also push each dump **off-box** to Azure Blob Storage (recommended — a VM loss
+otherwise takes the backups with it).
+
+Restore a dump:
+
+```bash
+gzip -dc sentinel_ai-YYYYmmdd-HHMMSS.sql.gz | \
+  docker exec -i sentinel-postgres psql -U postgres -d sentinel_ai
+```
+
+**Recommendation:** the sidecar covers the current containerized Postgres. For a
+managed option with automated point-in-time restore, migrate to **Azure Database
+for PostgreSQL – Flexible Server** (enable the `vector` extension); keep the
+`pg_dump` sidecar as a secondary, portable backup.
+
+
 ## Tech Stack
 
 - **Backend:** Python 3.11 + FastAPI

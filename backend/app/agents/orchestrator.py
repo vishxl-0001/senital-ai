@@ -229,8 +229,9 @@ async def process_alert(alert):
                 await db.commit()
                 incident_data["fix_result"] = fix_result
                 await send_incident_to_slack(
-                    incident_data, channel="#incidents",
+                    incident_data,
                     is_resolved=(incident.status == IncidentStatus.RESOLVED),
+                    tenant_id=alert.tenant_id,
                 )
             else:
                 # ── Needs Human Approval ──
@@ -238,7 +239,7 @@ async def process_alert(alert):
                 await _add_timeline(db, incident.id, "fix", "Awaiting human approval",
                                     policy_decision.reason, actor="system", tenant_id=alert.tenant_id)
                 await db.commit()
-                await send_incident_to_slack(incident_data, channel="#incidents")
+                await send_incident_to_slack(incident_data, tenant_id=alert.tenant_id)
 
             log.info(
                 "🎯 Pipeline complete",

@@ -152,6 +152,6 @@ def execute_fix_task(incident_id: str, approval_source: str = "unknown", approve
             }
             
             log.info(f"✅ Fix execution completed. Result: {fix_result['status']}")
-            await send_incident_to_slack(incident_data, channel="#incidents")
+            await send_incident_to_slack(incident_data, tenant_id=tenant_id)
 
     asyncio.run(_run())
