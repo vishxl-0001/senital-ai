@@ -1,21 +1,38 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
-import { listApiKeys, createApiKey as createApiKeyRequest } from "@/lib/api";
+import { listApiKeys, createApiKey as createApiKeyRequest, getSlackInstallUrl } from "@/lib/api";
 import {
   ShieldAlert, Activity, Terminal, Settings, FileText,
-  LayoutDashboard, Key, Plus, Trash2, Copy, Check
+  LayoutDashboard, Key, Plus, Trash2, Copy, Check,
+  MessageSquare, ExternalLink, CheckCircle2, XCircle, Loader2
 } from "lucide-react";
 
+type SlackStatus = "idle" | "loading" | "connected" | "denied" | "error";
+
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsContent />
+    </Suspense>
+  );
+}
+
+function SettingsContent() {
   const [mounted, setMounted] = useState(false);
   const [apiKeys, setApiKeys] = useState<any[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
   const [generatedKey, setGeneratedKey] = useState("");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Slack OAuth state
+  const [slackStatus, setSlackStatus] = useState<SlackStatus>("idle");
+  const [slackConnecting, setSlackConnecting] = useState(false);
+  const searchParams = useSearchParams();
 
   // The backend derives the tenant from the verified Clerk session JWT — the
   // client never sends tenant_id. listApiKeys()/createApiKey() attach the
@@ -32,7 +49,13 @@ export default function SettingsPage() {
   useEffect(() => {
     setMounted(true);
     loadApiKeys();
-  }, []);
+
+    // Check for Slack OAuth callback query params
+    const slackParam = searchParams.get("slack");
+    if (slackParam === "connected") setSlackStatus("connected");
+    else if (slackParam === "denied") setSlackStatus("denied");
+    else if (slackParam === "error") setSlackStatus("error");
+  }, [searchParams]);
 
   const createApiKey = async () => {
     if (!newKeyName.trim()) return;
@@ -52,6 +75,19 @@ export default function SettingsPage() {
     navigator.clipboard.writeText(generatedKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const connectSlack = async () => {
+    setSlackConnecting(true);
+    try {
+      const data = await getSlackInstallUrl();
+      // Redirect the browser to Slack's OAuth authorize page
+      window.location.href = data.authorize_url;
+    } catch (err) {
+      console.error("Failed to start Slack install", err);
+      setSlackStatus("error");
+      setSlackConnecting(false);
+    }
   };
 
   if (!mounted) return null;
@@ -95,8 +131,76 @@ export default function SettingsPage() {
 
         <div className="flex-1 overflow-auto p-8 z-0">
           <div className="max-w-4xl mx-auto space-y-8">
+
+            {/* ── Slack Integration Section ── */}
+            <div className="glass-panel rounded-xl p-6 border border-white/10">
+              <div className="flex items-center gap-3 mb-6">
+                <MessageSquare className="text-primary" size={24} />
+                <h2 className="text-lg font-medium">Slack Integration</h2>
+              </div>
+              <p className="text-sm text-zinc-400 mb-6">
+                Connect your Slack workspace to receive real-time incident alerts, approve fixes directly from Slack, and keep your team in the loop.
+              </p>
+
+              {/* Status banner based on OAuth callback */}
+              {slackStatus === "connected" && (
+                <div className="mb-6 p-4 bg-success/10 border border-success/30 rounded-lg flex items-center gap-3">
+                  <CheckCircle2 size={20} className="text-success shrink-0" />
+                  <div>
+                    <h3 className="text-success font-medium text-sm">Slack Connected!</h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      Your Slack workspace has been connected. Sentinel AI will now send incident notifications to your configured channel.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {slackStatus === "denied" && (
+                <div className="mb-6 p-4 bg-danger/10 border border-danger/30 rounded-lg flex items-center gap-3">
+                  <XCircle size={20} className="text-danger shrink-0" />
+                  <div>
+                    <h3 className="text-danger font-medium text-sm">Installation Denied</h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      The Slack installation was cancelled or denied. You can try again below.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {slackStatus === "error" && (
+                <div className="mb-6 p-4 bg-danger/10 border border-danger/30 rounded-lg flex items-center gap-3">
+                  <XCircle size={20} className="text-danger shrink-0" />
+                  <div>
+                    <h3 className="text-danger font-medium text-sm">Connection Error</h3>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      Something went wrong during the Slack OAuth flow. Please try again.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-4 p-4 bg-surface rounded-lg border border-white/5">
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-white mb-1">Connect to Slack</h3>
+                  <p className="text-xs text-zinc-500">
+                    Clicking the button will redirect you to Slack to authorize the Sentinel AI bot for your workspace.
+                  </p>
+                </div>
+                <button
+                  id="connect-slack-btn"
+                  onClick={connectSlack}
+                  disabled={slackConnecting}
+                  className="bg-[#4A154B] hover:bg-[#611f69] text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 shadow-lg hover:shadow-[#4A154B]/25 shrink-0"
+                >
+                  {slackConnecting ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <ExternalLink size={16} />
+                  )}
+                  {slackConnecting ? "Redirecting…" : "Connect Slack"}
+                </button>
+              </div>
+            </div>
             
-            {/* API Keys Section */}
+            {/* ── API Keys Section ── */}
             <div className="glass-panel rounded-xl p-6 border border-white/10">
               <div className="flex items-center gap-3 mb-6">
                 <Key className="text-primary" size={24} />

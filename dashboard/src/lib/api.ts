@@ -178,6 +178,16 @@ export async function createApiKey(
   return res.json();
 }
 
+// ── Slack OAuth (item 13) ──
+
+export async function getSlackInstallUrl(): Promise<{ authorize_url: string }> {
+  const res = await authedFetch(`${API_BASE}/api/v1/slack/oauth/install`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Failed to get Slack install URL: ${res.status}`);
+  return res.json();
+}
+
 // ── Health ──
 
 export async function checkHealth(): Promise<any> {
