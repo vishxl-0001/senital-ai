@@ -182,8 +182,12 @@ async def get_current_tenant(
     claims = verifier.verify(token)
     org_id = claims.get("org_id")
     if not org_id:
-        raise HTTPException(
-            status_code=403,
-            detail="No active organization. Select or create an organization to continue.",
-        )
+        # Fallback to the user ID (sub) if no organization is active.
+        # This allows single-user testing without requiring a Clerk Organization.
+        org_id = claims.get("sub")
+        if not org_id:
+            raise HTTPException(
+                status_code=403,
+                detail="No active organization or user ID found in token.",
+            )
     return org_id
