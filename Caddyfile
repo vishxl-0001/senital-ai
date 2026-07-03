@@ -1,0 +1,21 @@
+sentinel-ai-vishxl.centralindia.cloudapp.azure.com {
+    # Route all backend API calls and WebSocket connections directly to FastAPI.
+    # This ensures Slack webhooks, interactions, and other POST callbacks from
+    # external services are NOT intercepted by Next.js (which would 404 them).
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /ws* {
+        reverse_proxy localhost:8000
+    }
+
+    handle /health {
+        reverse_proxy localhost:8000
+    }
+
+    # Everything else (dashboard pages, Next.js static assets) goes to Next.js.
+    handle {
+        reverse_proxy localhost:3000
+    }
+}

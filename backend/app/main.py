@@ -59,9 +59,17 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS (allow dashboard to connect) ──
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    # Production Azure domain — required for Slack callbacks and dashboard API calls
+    "https://sentinel-ai-vishxl.centralindia.cloudapp.azure.com",
+    settings.FRONTEND_BASE_URL,
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=list(set(CORS_ORIGINS)),  # deduplicate
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
