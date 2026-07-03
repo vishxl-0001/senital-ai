@@ -80,7 +80,7 @@ class Incident(Base):
     root_cause = Column(Text)  # Root cause description
     rca_evidence = Column(JSON)  # Evidence supporting the RCA
     rca_confidence = Column(Float)  # 0.0 to 1.0
-    rca_embedding = Column(Vector(384))  # RAG embedding for semantic search (fastembed bge-small-en-v1.5)
+    rca_embedding = Column(Vector(1536))  # RAG embedding for semantic search (OpenAI text-embedding-3-small)
     similar_incidents = Column(JSON)  # Past similar incidents
 
     # Remediation

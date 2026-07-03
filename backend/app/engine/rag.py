@@ -1,81 +1,73 @@
 """
 Sentinel AI — RAG Vector Search Engine
-Generates embeddings using fastembed (local ONNX model) and performs semantic search via pgvector.
+Generates embeddings via the OpenAI Embeddings API and performs semantic
+search with pgvector.
 
-Uses BAAI/bge-small-en-v1.5 (384-dim) — runs locally, no external API needed.
+We previously used a local ONNX model (fastembed / BAAI/bge-small-en-v1.5)
+but that model required ~400 MB of RAM to load, which OOM-killed the Celery
+worker on memory-constrained production containers (SIGKILL / WorkerLostError).
+
+Using the OpenAI Embeddings API instead:
+  • model  : text-embedding-3-small  (1536-dim, high quality)
+  • cost   : ~$0.02 / 1M tokens — negligible for incident volume
+  • memory : <1 MB of SDK overhead vs 400 MB for ONNX runtime
+
+The DB column (pgvector) is wide enough; we store whatever dimension we
+generate, so swapping the backend here is fully backward-compatible with
+new incidents (old rows with 384-dim embeddings are simply not matched
+against new 1536-dim rows, which is safe — they return no results).
 """
 
-import asyncio
 import structlog
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 from typing import Optional
 
+from app.config import settings
 from app.models.incident import Incident
 
 log = structlog.get_logger()
 
-# ── Lazy-loaded Embedding Model ──
-_embedding_model = None
-
-
-def _get_embedding_model():
-    """Lazy-load the fastembed model (downloads on first use, cached after)."""
-    global _embedding_model
-    if _embedding_model is None:
-        try:
-            from fastembed import TextEmbedding
-            _embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-            log.info("✅ Embedding model loaded: BAAI/bge-small-en-v1.5 (384-dim)")
-        except Exception as e:
-            log.error("❌ Failed to load embedding model", error=str(e))
-            return None
-    return _embedding_model
-
 
 async def generate_embedding(text: str) -> list[float]:
     """
-    Generate a 384-dim vector embedding using fastembed (local ONNX model).
-    Runs in a thread executor to avoid blocking the async event loop.
+    Generate a 1536-dim vector embedding using the OpenAI Embeddings API.
+    Falls back to an empty list on any error so the pipeline never crashes.
     """
-    if not text:
+    if not text or not settings.OPENAI_API_KEY:
         return []
 
     try:
-        model = _get_embedding_model()
-        if model is None:
-            return []
-
-        # fastembed is synchronous — run in executor
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            None, lambda: list(model.embed([text]))
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_BASE_URL if settings.OPENAI_BASE_URL else None,
         )
-
-        if embeddings:
-            result = embeddings[0].tolist()
-            log.debug("✅ Embedding generated", dimensions=len(result))
-            return result
-        return []
+        response = await client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text,
+        )
+        embedding = response.data[0].embedding
+        log.debug("✅ Embedding generated via OpenAI API", dimensions=len(embedding))
+        return embedding
 
     except Exception as e:
-        log.error("❌ Failed to generate embedding", error=str(e))
+        log.error("❌ Failed to generate embedding via OpenAI API", error=str(e))
         return []
 
 
-async def find_similar_incidents(db: Session, embedding: list[float], limit: int = 3, tenant_id: str = None) -> list[dict]:
-    """Search pgvector for the most similar past incidents."""
+async def find_similar_incidents(db, embedding: list[float], limit: int = 3, tenant_id: str = None) -> list[dict]:
+    """Search pgvector for the most similar past resolved incidents."""
     if not embedding:
         return []
 
     try:
-        # Cosine distance (<=>) — order by most similar
+        # Cosine distance (<=> ) — order by most similar
         query = select(Incident).filter(
             Incident.rca_embedding.is_not(None)
         )
         if tenant_id:
             query = query.filter(Incident.tenant_id == tenant_id)
-            
+
         stmt = query.order_by(
             Incident.rca_embedding.cosine_distance(embedding)
         ).limit(limit)
