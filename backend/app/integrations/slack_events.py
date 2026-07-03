@@ -92,18 +92,26 @@ async def slack_interactions(request: Request):
             if action_id == "approve_fix":
                 await _handle_approve(incident_id, user_id, user_name, payload)
             elif action_id == "reject_fix":
-                await _handle_reject(incident_id, user_name, payload)
+                await _handle_reject(incident_id, user_id, payload)
 
     return Response(status_code=200)
 
 
 def is_authorized_approver(approver_ids, slack_user_id: str) -> bool:
     """
-    Authorize a Slack approver. Fails CLOSED: if no allow-list is configured
-    (None/empty) or the clicker isn't on it, approval is denied. Approvals can
-    still be made via the Clerk-authenticated dashboard.
+    Authorize a Slack approver.
+
+    • If no allow-list is configured (NULL / empty list) → allow everyone.
+      This is the default for new tenants and single-user setups; it means
+      any member of the workspace can approve/reject from Slack.
+    • If an allow-list IS set → only those Slack user IDs may approve.
+
+    Approvals can always be made via the Clerk-authenticated dashboard
+    regardless of this setting.
     """
-    if not approver_ids or not slack_user_id:
+    if not approver_ids:  # NULL or [] → open to any workspace member
+        return True
+    if not slack_user_id:
         return False
     return slack_user_id in set(approver_ids)
 
@@ -172,13 +180,13 @@ async def _handle_approve(incident_id: str, user_id: str, user_name: str, payloa
     )
 
 
-async def _handle_reject(incident_id: str, user: str, payload: dict):
+async def _handle_reject(incident_id: str, user_id: str, payload: dict):
     """Handle fix rejection from Slack."""
     from app.db.database import async_session
     from sqlalchemy import select
     from app.models.incident import Incident, IncidentStatus
 
-    log.info(f"❌ Fix rejected by {user} for incident {incident_id}")
+    log.info(f"❌ Fix rejected by {user_id} for incident {incident_id}")
 
     async with async_session() as db:
         result = await db.execute(
@@ -186,13 +194,15 @@ async def _handle_reject(incident_id: str, user: str, payload: dict):
         )
         incident = result.scalar_one_or_none()
 
-        if incident:
+        if incident and incident.status == IncidentStatus.FIX_PROPOSED:
             incident.status = IncidentStatus.ESCALATED
             await db.commit()
+        elif incident:
+            log.warning(f"Incident {incident_id} in {incident.status.value} — cannot reject")
 
     from app.integrations.slack_bot import send_slack_notification
     channel = payload.get("channel", {}).get("id", "#incidents")
     await send_slack_notification(
         channel,
-        f"❌ *Fix rejected* by <@{user}> for incident `{incident_id}`. Escalated for manual review."
+        f"❌ *Fix rejected* by <@{user_id}> for incident `{incident_id}`. Escalated for manual review."
     )
