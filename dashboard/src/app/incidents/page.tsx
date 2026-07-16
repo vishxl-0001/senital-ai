@@ -197,7 +197,9 @@ export default function IncidentsPage() {
         {/* Error Banner */}
         {error && (
           <div className="mb-4 p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-            ⚠️ {error} — Make sure the backend is running on port 8000
+            ⚠️ {error?.includes("403")
+              ? "No active organization — pick or create one with the organization switcher on the home page sidebar."
+              : `${error} — Make sure the backend is running on port 8000`}
           </div>
         )}
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import {
   ShieldAlert, Activity, CheckCircle, Clock,
   Terminal, Settings, FileText, LayoutDashboard,
@@ -60,7 +60,19 @@ export default function Dashboard() {
           <NavItem icon={<Settings size={20} />} label="Settings" href="/settings" />
         </nav>
         
-        <div className="p-4 border-t border-white/10">
+        <div className="p-4 border-t border-white/10 space-y-2">
+          {/* Tenant context: the backend scopes all data to the active Clerk
+              organization and returns 403 without one. */}
+          <OrganizationSwitcher
+            hidePersonal
+            appearance={{
+              elements: {
+                rootBox: "w-full",
+                organizationSwitcherTrigger:
+                  "w-full justify-start text-zinc-300 hover:bg-white/5 rounded-lg px-2 py-2",
+              },
+            }}
+          />
           <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
             <UserButton />
             <div className="flex flex-col text-sm">

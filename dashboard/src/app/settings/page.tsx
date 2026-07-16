@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import { listApiKeys, createApiKey as createApiKeyRequest, getSlackInstallUrl } from "@/lib/api";
 import {
   ShieldAlert, Activity, Terminal, Settings, FileText,
@@ -112,7 +112,17 @@ function SettingsContent() {
           <NavItem icon={<Settings size={20} />} label="Settings" href="/settings" active />
         </nav>
         
-        <div className="p-4 border-t border-white/10">
+        <div className="p-4 border-t border-white/10 space-y-2">
+          <OrganizationSwitcher
+            hidePersonal
+            appearance={{
+              elements: {
+                rootBox: "w-full",
+                organizationSwitcherTrigger:
+                  "w-full justify-start text-zinc-300 hover:bg-white/5 rounded-lg px-2 py-2",
+              },
+            }}
+          />
           <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
             <UserButton />
             <div className="flex flex-col text-sm">
