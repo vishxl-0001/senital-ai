@@ -188,6 +188,86 @@ export async function getSlackInstallUrl(): Promise<{ authorize_url: string }> {
   return res.json();
 }
 
+// ── Uptime Monitors API ──
+
+export interface Monitor {
+  id: string;
+  name: string;
+  url: string;
+  interval_seconds: number;
+  timeout_seconds: number;
+  expected_status_codes: number[];
+  keyword: string | null;
+  latency_threshold_ms: number | null;
+  ssl_check_enabled: boolean;
+  ssl_warn_days: number;
+  failure_threshold: number;
+  is_active: boolean;
+  status: "pending" | "up" | "down" | "paused";
+  last_checked_at: string | null;
+  last_response_ms: number | null;
+  last_status_code: number | null;
+  last_error: string | null;
+  consecutive_failures: number;
+  ssl_expires_at: string | null;
+  created_at: string | null;
+}
+
+export interface MonitorCreateInput {
+  name: string;
+  url: string;
+  interval_seconds?: number;
+  timeout_seconds?: number;
+  keyword?: string | null;
+  latency_threshold_ms?: number | null;
+  ssl_check_enabled?: boolean;
+  failure_threshold?: number;
+}
+
+export async function fetchMonitors(): Promise<{ monitors: Monitor[] }> {
+  const res = await authedFetch(`${API_BASE}/api/v1/monitors`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Failed to fetch monitors: ${res.status}`);
+  return res.json();
+}
+
+export async function createMonitor(data: MonitorCreateInput): Promise<Monitor> {
+  const res = await authedFetch(`${API_BASE}/api/v1/monitors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Failed to create monitor: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteMonitor(id: string): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/api/v1/monitors/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete monitor: ${res.status}`);
+}
+
+export async function pauseMonitor(id: string): Promise<Monitor> {
+  const res = await authedFetch(`${API_BASE}/api/v1/monitors/${id}/pause`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to pause monitor: ${res.status}`);
+  return res.json();
+}
+
+export async function resumeMonitor(id: string): Promise<Monitor> {
+  const res = await authedFetch(`${API_BASE}/api/v1/monitors/${id}/resume`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to resume monitor: ${res.status}`);
+  return res.json();
+}
+
 // ── Health ──
 
 export async function checkHealth(): Promise<any> {

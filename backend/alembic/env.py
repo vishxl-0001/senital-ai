@@ -20,6 +20,7 @@ from app.db.database import Base
 # Import models so they register on Base.metadata for autogenerate.
 import app.models.incident  # noqa: F401
 import app.models.tenant    # noqa: F401
+import app.models.monitor   # noqa: F401
 
 config = context.config
 

@@ -30,6 +30,25 @@ def generate_raw_api_key() -> str:
     secret_part = ''.join(secrets.choice(alphabet) for _ in range(32))
     return f"sentinel_{secret_part}"
 
+async def resolve_tenant_from_raw_key(raw_key: str, db: AsyncSession) -> str:
+    """Resolve a raw API key to its tenant_id (401 if unknown/inactive)."""
+    key_hash = hash_api_key(raw_key)
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
+    )
+    db_api_key = result.scalar_one_or_none()
+
+    if not db_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or inactive API Key")
+
+    # Update last used
+    db_api_key.last_used_at = func.now()
+    await db.commit()
+
+    return db_api_key.tenant_id
+
+
 async def get_tenant_from_api_key(
     api_key: str = Security(API_KEY_HEADER),
     db: AsyncSession = Depends(get_db)
@@ -37,22 +56,8 @@ async def get_tenant_from_api_key(
     """Dependency to extract tenant_id from the provided API key."""
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key header")
-    
-    key_hash = hash_api_key(api_key)
-    
-    result = await db.execute(
-        select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
-    )
-    db_api_key = result.scalar_one_or_none()
-    
-    if not db_api_key:
-        raise HTTPException(status_code=401, detail="Invalid or inactive API Key")
-        
-    # Update last used
-    db_api_key.last_used_at = func.now()
-    await db.commit()
-    
-    return db_api_key.tenant_id
+
+    return await resolve_tenant_from_raw_key(api_key, db)
 
 
 # --- Dashboard Routes for Managing API Keys ---

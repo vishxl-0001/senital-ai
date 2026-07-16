@@ -90,6 +90,7 @@ async def db_engine():
     from app.db.database import Base
     import app.models.incident  # noqa: F401 — register models on Base.metadata
     import app.models.tenant    # noqa: F401
+    import app.models.monitor   # noqa: F401
 
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:

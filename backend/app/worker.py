@@ -33,6 +33,16 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
+# Uptime checker (external mode): one dispatcher sweep every 30s finds due
+# monitors and fans out one check_monitor_task per monitor. Requires a beat
+# process (`celery -A app.worker.celery_app beat`) — see docker-compose.
+celery_app.conf.beat_schedule = {
+    "check-due-monitors": {
+        "task": "check_due_monitors",
+        "schedule": 30.0,
+    },
+}
+
 
 @celery_app.task(
     name="process_alert_task",
@@ -153,5 +163,146 @@ def execute_fix_task(incident_id: str, approval_source: str = "unknown", approve
             
             log.info(f"✅ Fix execution completed. Result: {fix_result['status']}")
             await send_incident_to_slack(incident_data, tenant_id=tenant_id)
+
+    asyncio.run(_run())
+
+
+# ── Uptime checker tasks (external mode) ──
+
+# Dispatcher skips monitors touched within this many seconds, so two
+# overlapping beat sweeps can't double-check the same monitor.
+DISPATCH_GUARD_SECONDS = 25
+
+
+@celery_app.task(name="check_due_monitors")
+def check_due_monitors():
+    """
+    Beat-driven sweep: find active monitors whose interval has elapsed and fan
+    out one check_monitor_task per monitor. Due-filtering happens in Python —
+    even thousands of monitors is a trivial scan, and it keeps the query
+    portable.
+    """
+    from datetime import timedelta
+
+    async def _run():
+        from sqlalchemy import select
+        from app.db.database import async_session
+        from app.models.monitor import UptimeMonitor
+
+        now = datetime.utcnow()
+        guard = timedelta(seconds=DISPATCH_GUARD_SECONDS)
+        async with async_session() as db:
+            result = await db.execute(
+                select(
+                    UptimeMonitor.id,
+                    UptimeMonitor.interval_seconds,
+                    UptimeMonitor.last_checked_at,
+                ).where(UptimeMonitor.is_active == True)  # noqa: E712
+            )
+            due = [
+                str(monitor_id)
+                for monitor_id, interval, last in result.all()
+                if (last is None or now >= last + timedelta(seconds=interval))
+                and (last is None or now - last >= guard)
+            ]
+        for monitor_id in due:
+            check_monitor_task.delay(monitor_id)
+        if due:
+            log.info(f"⏱️ Dispatched {len(due)} uptime check(s)")
+
+    asyncio.run(_run())
+
+
+@celery_app.task(
+    name="check_monitor_task",
+    bind=True,
+    acks_late=True,
+    max_retries=0,  # a failed check simply runs again next interval
+    time_limit=60,
+    soft_time_limit=45,
+)
+def check_monitor_task(self, monitor_id: str):
+    """
+    Run one uptime check: HTTP (status/keyword/latency) plus a once-daily SSL
+    expiry check. Alerts fire through the normal pipeline exactly once, when
+    consecutive_failures reaches the monitor's failure_threshold; recovery
+    resolves the open incident directly (no AI needed).
+    """
+    from datetime import timedelta
+
+    async def _run():
+        from sqlalchemy import select
+        from urllib.parse import urlparse
+        from app.db.database import async_session
+        from app.models.monitor import UptimeMonitor, MonitorStatus
+        from app.engine.uptime import (
+            perform_http_check,
+            get_ssl_expiry,
+            build_down_alert,
+            build_ssl_alert,
+            resolve_uptime_incident,
+        )
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(UptimeMonitor).where(UptimeMonitor.id == monitor_id)
+            )
+            monitor = result.scalar_one_or_none()
+            if not monitor or not monitor.is_active:
+                return
+
+            # Claim the slot immediately so an overlapping sweep skips us.
+            monitor.last_checked_at = datetime.utcnow()
+            await db.commit()
+
+            was_down = monitor.status == MonitorStatus.DOWN
+            check = await perform_http_check(monitor)
+
+            if check["ok"]:
+                monitor.status = MonitorStatus.UP
+                monitor.consecutive_failures = 0
+                monitor.last_response_ms = check["response_ms"]
+                monitor.last_status_code = check["status_code"]
+                monitor.last_error = None
+                await db.commit()
+                if was_down:
+                    await resolve_uptime_incident(db, monitor)
+            else:
+                monitor.consecutive_failures += 1
+                monitor.last_error = check["failure_reason"]
+                monitor.last_status_code = check.get("status_code")
+                monitor.last_response_ms = check.get("response_ms")
+                if monitor.consecutive_failures >= monitor.failure_threshold:
+                    monitor.status = MonitorStatus.DOWN
+                    fire = monitor.consecutive_failures == monitor.failure_threshold
+                    await db.commit()
+                    if fire:  # fire exactly once per outage
+                        process_alert_task.delay(build_down_alert(monitor, check))
+                else:
+                    await db.commit()
+
+            # SSL expiry: https only, at most once per day per monitor.
+            if (
+                monitor.ssl_check_enabled
+                and monitor.url.startswith("https://")
+                and (
+                    monitor.ssl_last_checked_at is None
+                    or datetime.utcnow() - monitor.ssl_last_checked_at > timedelta(days=1)
+                )
+            ):
+                hostname = urlparse(monitor.url).hostname
+                port = urlparse(monitor.url).port or 443
+                expires = await asyncio.to_thread(get_ssl_expiry, hostname, port)
+                monitor.ssl_last_checked_at = datetime.utcnow()
+                if expires:
+                    monitor.ssl_expires_at = expires
+                    days_remaining = (expires - datetime.utcnow()).days
+                    if days_remaining < monitor.ssl_warn_days and (
+                        monitor.ssl_alerted_at is None
+                        or datetime.utcnow() - monitor.ssl_alerted_at > timedelta(days=7)
+                    ):
+                        monitor.ssl_alerted_at = datetime.utcnow()
+                        process_alert_task.delay(build_ssl_alert(monitor, days_remaining))
+                await db.commit()
 
     asyncio.run(_run())

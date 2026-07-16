@@ -3,10 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
-import { 
-  ShieldAlert, Activity, CheckCircle, Clock, 
+import {
+  ShieldAlert, Activity, CheckCircle, Clock,
   Terminal, Settings, FileText, LayoutDashboard,
-  Bell, Search, User, ArrowRight, Zap
+  Bell, Search, User, ArrowRight, Zap, Globe
 } from "lucide-react";
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, 
@@ -54,6 +54,7 @@ export default function Dashboard() {
         <nav className="flex-1 py-6 px-4 space-y-2">
           <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" href="/" active />
           <NavItem icon={<Activity size={20} />} label="Incidents" href="/incidents" badge="2" />
+          <NavItem icon={<Globe size={20} />} label="Monitors" href="/monitors" />
           <NavItem icon={<Terminal size={20} />} label="Policies" href="#" />
           <NavItem icon={<FileText size={20} />} label="Runbooks" href="#" />
           <NavItem icon={<Settings size={20} />} label="Settings" href="/settings" />

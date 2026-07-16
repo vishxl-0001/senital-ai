@@ -75,6 +75,25 @@ services:
       - ./backend:/app
     command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=4
 
+  # ── Celery Beat (Scheduler — drives the uptime checker sweeps) ──
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sentinel-celery-beat
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:sentinel_dev@postgres:5432/sentinel_ai
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    # --schedule outside /app so the state file doesn't land in the bind-mounted source dir
+    command: celery -A app.worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+
   # ── Next.js Dashboard (Frontend) ──
   dashboard:
     build:
