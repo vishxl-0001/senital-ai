@@ -180,7 +180,13 @@ async def get_current_tenant(
     """
     token = _extract_token(request)
     claims = verifier.verify(token)
+    # v1 session tokens carry a top-level org_id; v2 (Clerk API 2025-04-10+)
+    # nests the active organization under the compact `o` claim as o.id.
     org_id = claims.get("org_id")
+    if not org_id:
+        o = claims.get("o")
+        if isinstance(o, dict):
+            org_id = o.get("id")
     if not org_id:
         # No sub fallback: a personal session has no tenant context, and
         # falling back to the user id would silently split the same human's

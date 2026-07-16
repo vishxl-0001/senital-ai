@@ -117,6 +117,30 @@ async def test_token_without_org_is_403(client, make_token):
     assert r.status_code == 403, r.text
 
 
+async def test_v2_session_token_org_claim(client, make_token, rsa_keypair):
+    # Clerk session token v2 (API 2025-04-10+) nests the active org under the
+    # compact `o` claim (o.id) instead of a top-level org_id.
+    from datetime import datetime, timedelta, timezone
+    from jose import jwt as jose_jwt
+    from tests.conftest import TEST_ISSUER
+
+    now = datetime.now(timezone.utc)
+    token = jose_jwt.encode(
+        {
+            "iss": TEST_ISSUER,
+            "sub": "user_v2",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+            "o": {"id": ORG_A, "slg": "org-a", "rol": "admin"},
+        },
+        rsa_keypair["private"],
+        algorithm="RS256",
+        headers={"kid": rsa_keypair["kid"]},
+    )
+    r = await client.get("/api/v1/incidents", headers=auth(token))
+    assert r.status_code == 200, r.text
+
+
 async def test_expired_token_is_401(client, make_token):
     token = make_token(org_id=ORG_A, expired=True)
     r = await client.get("/api/v1/incidents", headers=auth(token))
