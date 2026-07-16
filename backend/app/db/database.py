@@ -12,12 +12,23 @@ from app.config import settings
 log = structlog.get_logger()
 
 
+import sys
+from sqlalchemy.pool import NullPool
+
 # ── Engine ──
+is_celery = "celery" in sys.argv[0] or (len(sys.argv) > 1 and "celery" in sys.argv[1])
+
+kwargs = {}
+if is_celery:
+    kwargs["poolclass"] = NullPool
+else:
+    kwargs["pool_size"] = 20
+    kwargs["max_overflow"] = 10
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_ENV == "development",
-    pool_size=20,
-    max_overflow=10,
+    **kwargs
 )
 
 # ── Session Factory ──

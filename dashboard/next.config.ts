@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
         source: "/health",
         destination: "http://backend:8000/health",
       },
+      {
+        source: "/ws",
+        destination: "http://backend:8000/ws",
+      },
     ];
   },
 };

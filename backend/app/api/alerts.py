@@ -141,7 +141,7 @@ async def send_test_alert(
     test_alert = GenericAlert(
         source="test",
         tenant_id=tenant_id,
-        title="Pod CrashLoopBackOff: payment-service",
+        title="Pod CrashLoopBackOff: payment-service-v2",
         description="Pod payment-service-7d4f8b6c5-x9k2l is in CrashLoopBackOff state. Container has restarted 5 times in the last 10 minutes.",
         severity="critical",
         labels={

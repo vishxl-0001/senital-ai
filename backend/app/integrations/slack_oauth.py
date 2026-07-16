@@ -39,7 +39,7 @@ STATE_TTL_SECONDS = 600  # 10 minutes
 
 
 def _redirect_uri() -> str:
-    return f"{settings.BACKEND_BASE_URL.rstrip('/')}/api/v1/slack/oauth/callback"
+    return f"{settings.FRONTEND_BASE_URL.rstrip('/')}/api/v1/slack/oauth/callback"
 
 
 def _sign_state(tenant_id: str) -> str:
