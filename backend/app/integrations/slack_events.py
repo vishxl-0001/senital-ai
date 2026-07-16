@@ -99,18 +99,17 @@ async def slack_interactions(request: Request):
 
 def is_authorized_approver(approver_ids, slack_user_id: str) -> bool:
     """
-    Authorize a Slack approver.
+    Authorize a Slack approver. Fails CLOSED:
 
-    • If no allow-list is configured (NULL / empty list) → allow everyone.
-      This is the default for new tenants and single-user setups; it means
-      any member of the workspace can approve/reject from Slack.
+    • If no allow-list is configured (NULL / empty list) → reject everyone.
+      Slack workspace membership is NOT an authorization boundary — anyone in
+      the channel could press Approve and execute a fix on customer infra.
+      Tenants must explicitly configure ``slack_approver_ids``; until then,
+      approvals go through the Clerk-authenticated dashboard.
     • If an allow-list IS set → only those Slack user IDs may approve.
-
-    Approvals can always be made via the Clerk-authenticated dashboard
-    regardless of this setting.
     """
-    if not approver_ids:  # NULL or [] → open to any workspace member
-        return True
+    if not approver_ids:  # NULL or [] → fail closed, approve via dashboard
+        return False
     if not slack_user_id:
         return False
     return slack_user_id in set(approver_ids)
