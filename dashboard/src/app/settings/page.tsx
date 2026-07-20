@@ -107,8 +107,8 @@ function SettingsContent() {
         <nav className="flex-1 py-6 px-4 space-y-2">
           <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" href="/" />
           <NavItem icon={<Activity size={20} />} label="Incidents" href="/incidents" />
-          <NavItem icon={<Terminal size={20} />} label="Policies" href="#" />
-          <NavItem icon={<FileText size={20} />} label="Runbooks" href="#" />
+          <NavItem icon={<Terminal size={20} />} label="Policies" href="/policies" />
+          <NavItem icon={<FileText size={20} />} label="Runbooks" href="/runbooks" />
           <NavItem icon={<Settings size={20} />} label="Settings" href="/settings" active />
         </nav>
         

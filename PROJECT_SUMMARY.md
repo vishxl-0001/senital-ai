@@ -1,6 +1,6 @@
 # 🛡️ Sentinel AI — Project Summary & Handover Document
 
-**Date:** June 30, 2026
+**Date:** July 20, 2026
 **Purpose:** Comprehensive overview of the project's current state, aims, and completed features to serve as a context handover for future AI assistants.
 
 ---
@@ -27,9 +27,9 @@ Sentinel AI is designed to be an enterprise-ready, autonomous Site Reliability E
    - **Governance Dashboard:** Built an enterprise settings dashboard enabling users to manage API keys, webhook endpoints, and automated remediation policies.
 
 3. **AI & Integration Pipelines:**
-   - **LLM Engine Migration:** Successfully integrated the Groq LLM API (replacing OpenAI) to significantly speed up agent reasoning and reduce costs. Addressed Groq's embedding limitations by integrating `fastembed` for local vectorization.
+   - **LLM Engine:** Uses the Groq LLM API for fast, low-cost agent reasoning. Embeddings for RAG semantic search use the OpenAI Embeddings API (`text-embedding-3-small`, 1536-dim, stored in pgvector) — this replaced an earlier local `fastembed`/ONNX approach that caused Celery OOM (SIGKILL) on the 4GB VM.
    - **Agent Orchestration:** Utilized LangGraph and LangChain to build autonomous investigation agents capable of parsing alerts, deducing root causes, and formulating fix strategies.
-   - **Communication & Alerting:** Integrated Slack Bolt SDK for bi-directional communication (alerting engineers and handling human-in-the-loop remediation approvals).
+   - **Communication & Alerting:** Integrated Slack Bolt/SDK for bi-directional communication — incident alerts, human-in-the-loop approval buttons (authorized, fail-closed), and natural-language `@mention` commands (`investigate`, `status`, `help`).
    - **Health Infrastructure:** Deployed comprehensive health check endpoints (`/api/v1/health`) ensuring Postgres, Redis, and API endpoints are actively monitored.
 
 4. **Production Cloud Deployment (Azure):**
@@ -59,11 +59,22 @@ Sentinel AI is designed to be an enterprise-ready, autonomous Site Reliability E
 
 ## 🚀 Current State
 
-The system has graduated from a local development prototype to a fully containerized, cloud-hosted production environment on Azure. The core loop—receiving a webhook, authenticating the tenant, triggering an AI diagnostic celery task, and displaying the incident live on the Next.js dashboard—is functionally mapped out and deployed. The platform relies on secure HTTPS via Caddy and is integrated with Clerk for multi-tenant identity management.
+The system has graduated from a local development prototype to a fully containerized, cloud-hosted production environment on Azure. The core loop—receiving a webhook, authenticating the tenant, triggering an AI diagnostic Celery task, and displaying the incident live on the Next.js dashboard—is functional and deployed. The platform relies on secure HTTPS via Caddy and is integrated with Clerk for multi-tenant identity management.
+
+Since the initial prototype, a hardening program (Phases 1–5, items 1–19) landed the following. **This section is the source of truth for what is done — the git log is authoritative for specifics.**
+
+- **Phase 1 — Tenant isolation:** Server-side enforcement. `tenant_id` is derived from the *verified* Clerk session JWT (`org_id` claim, incl. v2 nested org claim); the client never sends it. Endpoints return 403 without an active org.
+- **Phase 2 — Real safety, no fabricated data:** No shell execution; K8s actions go through a typed whitelist (`restart_pod`, `rollback_deployment`, `scale_horizontal`, `clear_disk`). Prometheus returns real metrics — mock series are dev-only, opt-in, and logged loudly. Slack fix approvals are authorized and **fail closed** (empty allow-list ⇒ approve via dashboard only).
+- **Phase 3 — Migrations & numbering:** Real Alembic migrations (no `create_all`); per-tenant sequential incident numbering (e.g. `ACME-1042`) so global volume doesn't leak.
+- **Phase 4 — Durable pipeline & live UI:** Investigations run as durable Celery tasks (survive restarts, bounded concurrency); live incident updates stream to the dashboard over WebSocket; per-tenant Slack OAuth install stores a Fernet-encrypted bot token.
+- **Phase 5 — Production ops:** Append-only audit log on every fix; per-caller rate limiting on webhook/agent/Slack endpoints; production docker-compose; automated Postgres backups.
+- **External-mode monitoring:** Uptime checker (HTTP status/keyword/latency + SSL expiry) driven by Celery beat, with automatic recovery resolution and vendor webhook ingestion — lets the platform monitor sites without an in-cluster agent.
+- **Dashboard completeness (July 2026):** Landing dashboard, Policies, and Runbooks pages are all wired to live backend data (no mock arrays remain). Slack `@mention` NL commands implemented.
 
 ## 🧭 Next Steps for the AI Assistant
 
-1. **Expand Agent Skills:** The next major phase is giving the AI agents real "hands." You will need to expand the LangGraph tools to allow the agent to read Kubernetes logs, restart pods, modify AWS/Azure security groups, or query databases directly.
-2. **Policy Enforcement Engine:** Flesh out the execution engine that respects the governance policies (e.g., distinguishing between "Auto-Remediate" and "Require Human Approval").
-3. **UI/UX Polish:** Wire up the remaining Next.js frontend components to the WebSocket feeds to show visually stunning, live representations of the AI traversing the LangGraph state machine.
-4. **Monitoring the Azure VM:** Keep an eye on the B2s VM's memory and CPU usage, as running Next.js builds, Celery, Postgres, and FastAPI concurrently on a 4GB RAM instance requires careful resource management.
+1. **Expand Agent Skills:** Grow the LangGraph tool set beyond the current K8s whitelist — reading logs from more sources, cloud provider actions (AWS/Azure security groups), and DB queries — always routed through the typed-action whitelist in `app/engine/k8s_actions.py`.
+2. **Runbook execution:** Runbooks are currently authored and stored (`app/api/runbooks.py` + `/runbooks` UI) but not yet auto-matched to an RCA and executed. Wire `trigger_pattern` matching into the orchestrator so a matching runbook can drive a fix.
+3. **Policy edit/delete UI:** The Policies page supports list/create/seed; add enable-toggle, edit, and delete (backend `PATCH`/`DELETE` still to be added to `app/api/policies.py`).
+4. **Tenant-scoped WebSocket:** `/ws` currently broadcasts to all clients (see note in `useIncidentStream.ts`). Scope broadcasts per tenant before relying on payloads as anything more than refresh hints.
+5. **Monitoring the Azure VM:** Keep an eye on the B2s VM's memory and CPU, as Next.js builds, Celery, Postgres, and FastAPI on a 4GB instance require careful resource management.

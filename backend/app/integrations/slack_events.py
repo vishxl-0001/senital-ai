@@ -6,6 +6,7 @@ Runs as a separate async handler mounted on FastAPI.
 
 import json
 import structlog
+from typing import Optional
 from fastapi import APIRouter, Request, Response
 from slack_sdk.signature import SignatureVerifier
 
@@ -49,13 +50,179 @@ async def slack_events(request: Request):
     event_type = event.get("type")
 
     if event_type == "app_mention":
-        # Someone @mentioned the bot
-        text = event.get("text", "").lower()
+        # Someone @mentioned the bot. Slack requires a 200 within 3s, so we
+        # acknowledge immediately and dispatch any command handling in the
+        # background (Slack retries on timeout, which would double-fire).
+        team_id = payload.get("team_id")
+        text = event.get("text", "")
         channel = event.get("channel")
-        log.info("🤖 Bot mentioned", channel=channel, text=text)
-        # TODO: Handle natural language commands like "@sentinel investigate payment-service"
+        log.info("🤖 Bot mentioned", channel=channel, text=text, team_id=team_id)
+        await _handle_mention(team_id, channel, text)
 
     return Response(status_code=200)
+
+
+# Commands the bot understands from an @mention. Kept intentionally small and
+# explicit — this is a control surface over customer infra, so we match known
+# verbs rather than free-form LLM interpretation.
+def _parse_mention(text: str) -> tuple[str, str]:
+    """
+    Strip the leading <@BOTID> mention and return (command, argument).
+    e.g. "<@U123> investigate payment-service" -> ("investigate", "payment-service")
+    """
+    import re
+
+    # Remove all <@...> user mentions (the bot's own id leads the text).
+    cleaned = re.sub(r"<@[^>]+>", "", text).strip()
+    if not cleaned:
+        return "", ""
+    parts = cleaned.split(maxsplit=1)
+    command = parts[0].lower()
+    argument = parts[1].strip() if len(parts) > 1 else ""
+    return command, argument
+
+
+async def _resolve_tenant_by_team(team_id: str) -> Optional[str]:
+    """Map an installing Slack workspace (team_id) to its tenant_id."""
+    if not team_id:
+        return None
+    from app.db.database import async_session
+    from sqlalchemy import select
+    from app.models.tenant import Tenant
+
+    async with async_session() as db:
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.slack_team_id == team_id))
+        ).scalar_one_or_none()
+        return tenant.id if tenant else None
+
+
+async def _handle_mention(team_id: str, channel: str, text: str):
+    """
+    Handle an @mention command. Supported:
+      • investigate <service/description>  — open an incident + run the pipeline
+      • status                             — summarize open incidents
+      • help                               — list commands
+    Falls through to a help message for anything unrecognized.
+    """
+    from app.integrations.slack_bot import send_slack_notification
+
+    command, argument = _parse_mention(text)
+    tenant_id = await _resolve_tenant_by_team(team_id)
+
+    if not tenant_id:
+        await send_slack_notification(
+            channel,
+            "⚠️ This Slack workspace isn't linked to a Sentinel organization yet. "
+            "Connect it from *Settings → Slack Integration* in the dashboard.",
+        )
+        return
+
+    if command == "investigate":
+        if not argument:
+            await send_slack_notification(
+                channel,
+                "Usage: `@Sentinel investigate <service or description>` — "
+                "e.g. `@Sentinel investigate payment-service latency spike`.",
+                tenant_id=tenant_id,
+            )
+            return
+        await _trigger_investigation(tenant_id, channel, argument)
+
+    elif command == "status":
+        await _send_status(tenant_id, channel)
+
+    elif command in ("help", ""):
+        await send_slack_notification(
+            channel,
+            "*Sentinel commands:*\n"
+            "• `@Sentinel investigate <service>` — start an AI investigation\n"
+            "• `@Sentinel status` — summarize open incidents\n"
+            "• `@Sentinel help` — show this message",
+            tenant_id=tenant_id,
+        )
+
+    else:
+        await send_slack_notification(
+            channel,
+            f"Sorry, I don't recognize `{command}`. Try `@Sentinel help`.",
+            tenant_id=tenant_id,
+        )
+
+
+async def _trigger_investigation(tenant_id: str, channel: str, description: str):
+    """Kick off the normal investigation pipeline from a Slack command."""
+    from app.api.alerts import GenericAlert
+    from app.worker import process_alert_task
+    from app.integrations.slack_bot import send_slack_notification
+
+    alert = GenericAlert(
+        source="slack",
+        tenant_id=tenant_id,
+        title=f"Manual investigation: {description[:200]}",
+        description=f"Investigation requested from Slack: {description}",
+        severity="medium",
+        labels={"requested_via": "slack", "raw_request": description},
+        raw_payload={"origin": "slack_mention", "channel": channel},
+    )
+    process_alert_task.delay(alert.model_dump())
+
+    await send_slack_notification(
+        channel,
+        f"🔍 On it — starting an investigation for *{description}*. "
+        f"I'll post the findings here when the analysis completes.",
+        tenant_id=tenant_id,
+    )
+
+
+async def _send_status(tenant_id: str, channel: str):
+    """Post a one-line summary of the tenant's open incidents."""
+    from app.db.database import async_session
+    from sqlalchemy import select, func
+    from app.models.incident import Incident, IncidentStatus
+    from app.integrations.slack_bot import send_slack_notification
+
+    open_statuses = [
+        IncidentStatus.DETECTED,
+        IncidentStatus.INVESTIGATING,
+        IncidentStatus.RCA_COMPLETE,
+        IncidentStatus.FIX_PROPOSED,
+        IncidentStatus.FIX_APPROVED,
+        IncidentStatus.FIX_EXECUTING,
+        IncidentStatus.FIX_MONITORING,
+    ]
+
+    async with async_session() as db:
+        open_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(Incident)
+                .where(
+                    Incident.tenant_id == tenant_id,
+                    Incident.status.in_(open_statuses),
+                )
+            )
+        ).scalar_one()
+
+        awaiting = (
+            await db.execute(
+                select(func.count())
+                .select_from(Incident)
+                .where(
+                    Incident.tenant_id == tenant_id,
+                    Incident.status == IncidentStatus.FIX_PROPOSED,
+                )
+            )
+        ).scalar_one()
+
+    if open_count == 0:
+        msg = "✅ No open incidents right now — all clear."
+    else:
+        msg = f"📊 *{open_count}* open incident(s)"
+        if awaiting:
+            msg += f", *{awaiting}* awaiting your approval"
+        msg += "."
+    await send_slack_notification(channel, msg, tenant_id=tenant_id)
 
 
 @router.post("/interactions")

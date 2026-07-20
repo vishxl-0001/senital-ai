@@ -12,7 +12,7 @@ import logging
 
 from app.config import settings
 from app.db.database import init_db
-from app.api import alerts, incidents, policies, health, websockets, auth, agent, monitors, webhooks_vendors
+from app.api import alerts, incidents, policies, runbooks, health, websockets, auth, agent, monitors, webhooks_vendors
 from app.integrations.slack_events import router as slack_router
 from app.integrations.slack_oauth import router as slack_oauth_router
 
@@ -81,6 +81,7 @@ app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(incidents.router, prefix="/api/v1/incidents", tags=["Incidents"])
 app.include_router(policies.router, prefix="/api/v1/policies", tags=["Policies"])
+app.include_router(runbooks.router, prefix="/api/v1/runbooks", tags=["Runbooks"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["Agent"])
 app.include_router(monitors.router, prefix="/api/v1/monitors", tags=["Monitors"])
 app.include_router(webhooks_vendors.router, prefix="/api/v1/webhooks", tags=["Vendor Webhooks"])

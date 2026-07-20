@@ -118,13 +118,76 @@ export async function approveFix(id: string): Promise<any> {
   return res.json();
 }
 
+// ── Dashboard Stats ──
+
+export interface DashboardStats {
+  counters: {
+    total: number;
+    active: number;
+    resolved: number;
+    awaiting_approval: number;
+    avg_mttr_seconds: number | null;
+  };
+  timeseries: { time: string; incidents: number; resolved: number }[];
+  recent: {
+    id: string;
+    incident_reference: string | null;
+    title: string;
+    status: string;
+    severity: string;
+    fix_type: string | null;
+    created_at: string | null;
+  }[];
+}
+
+export async function fetchStats(): Promise<DashboardStats> {
+  const res = await authedFetch(`${API_BASE}/api/v1/incidents/stats`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Failed to fetch stats: ${res.status}`);
+  return res.json();
+}
+
 // ── Policies API ──
 
-export async function fetchPolicies(): Promise<{ policies: any[] }> {
+export interface Policy {
+  id: string;
+  name: string;
+  description: string | null;
+  action_type: string;
+  auto_approve: boolean;
+  conditions: Record<string, any> | null;
+  constraints: Record<string, any> | null;
+  approval_timeout_minutes: number;
+  enabled: boolean;
+}
+
+export async function fetchPolicies(): Promise<{ policies: Policy[] }> {
   const res = await authedFetch(`${API_BASE}/api/v1/policies`, {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`Failed to fetch policies: ${res.status}`);
+  return res.json();
+}
+
+export interface PolicyCreateInput {
+  name: string;
+  description?: string;
+  action_type: string;
+  auto_approve?: boolean;
+  approval_timeout_minutes?: number;
+}
+
+export async function createPolicy(data: PolicyCreateInput): Promise<any> {
+  const res = await authedFetch(`${API_BASE}/api/v1/policies/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Failed to create policy: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -134,6 +197,72 @@ export async function seedDefaultPolicies(): Promise<any> {
   });
   if (!res.ok) throw new Error(`Failed to seed policies: ${res.status}`);
   return res.json();
+}
+
+// ── Runbooks API ──
+
+export interface Runbook {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger_pattern: string | null;
+  steps: { action: string; description?: string }[];
+  rollback_steps: any[] | null;
+  success_criteria: Record<string, any> | null;
+  times_used: number;
+  success_rate: number;
+  avg_fix_time_seconds: number | null;
+  enabled: boolean;
+  created_at: string | null;
+}
+
+export interface RunbookCreateInput {
+  name: string;
+  description?: string;
+  trigger_pattern?: string;
+  steps: { action: string; description?: string }[];
+  enabled?: boolean;
+}
+
+export async function fetchRunbooks(): Promise<{ runbooks: Runbook[] }> {
+  const res = await authedFetch(`${API_BASE}/api/v1/runbooks`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Failed to fetch runbooks: ${res.status}`);
+  return res.json();
+}
+
+export async function createRunbook(data: RunbookCreateInput): Promise<Runbook> {
+  const res = await authedFetch(`${API_BASE}/api/v1/runbooks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Failed to create runbook: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateRunbook(
+  id: string,
+  patch: Partial<RunbookCreateInput>
+): Promise<Runbook> {
+  const res = await authedFetch(`${API_BASE}/api/v1/runbooks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Failed to update runbook: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteRunbook(id: string): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/api/v1/runbooks/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete runbook: ${res.status}`);
 }
 
 // ── Alerts API ──
