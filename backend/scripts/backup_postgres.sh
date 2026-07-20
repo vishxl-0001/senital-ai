@@ -42,10 +42,14 @@ BLOB_NAME="$(basename "$OUT")"
 uploaded=0
 
 if [ -n "${AZURE_BACKUP_SAS_URL:-}" ]; then
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "[backup] installing curl for Blob upload"
-        (apt-get update -qq && apt-get install -y -qq --no-install-recommends curl) >/dev/null 2>&1 \
-            || apk add --no-cache curl >/dev/null 2>&1 || true
+    # curl + a CA bundle are needed for the HTTPS PUT. The stock pgvector image
+    # ships neither; install both (ca-certificates alone fixes curl error 77).
+    if ! command -v curl >/dev/null 2>&1 || [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
+        echo "[backup] installing curl + ca-certificates for Blob upload"
+        (apt-get update -qq \
+            && apt-get install -y -qq --no-install-recommends curl ca-certificates \
+            && update-ca-certificates) >/dev/null 2>&1 \
+            || apk add --no-cache curl ca-certificates >/dev/null 2>&1 || true
     fi
     if command -v curl >/dev/null 2>&1; then
         # Insert "/<blob>" before the "?<sas>" query string.
