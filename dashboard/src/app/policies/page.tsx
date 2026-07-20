@@ -5,10 +5,10 @@ import Link from "next/link";
 import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import {
   ShieldAlert, Activity, Terminal, Settings, FileText,
-  LayoutDashboard, Globe, Plus, Zap, ShieldCheck, Loader2, Sparkles
+  LayoutDashboard, Globe, Plus, Zap, ShieldCheck, Loader2, Sparkles, Trash2, Power
 } from "lucide-react";
 import {
-  fetchPolicies, createPolicy, seedDefaultPolicies, Policy
+  fetchPolicies, createPolicy, seedDefaultPolicies, updatePolicy, deletePolicy, Policy
 } from "@/lib/api";
 
 const ACTION_TYPES = [
@@ -87,6 +87,28 @@ export default function PoliciesPage() {
       setError(err.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleToggle = async (p: Policy) => {
+    // Optimistic flip; revert on failure.
+    setPolicies((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: !x.enabled } : x)));
+    try {
+      await updatePolicy(p.id, { enabled: !p.enabled });
+    } catch (err: any) {
+      setError(err.message);
+      setPolicies((prev) => prev.map((x) => (x.id === p.id ? { ...x, enabled: p.enabled } : x)));
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const prev = policies;
+    setPolicies((cur) => cur.filter((x) => x.id !== id));
+    try {
+      await deletePolicy(id);
+    } catch (err: any) {
+      setError(err.message);
+      setPolicies(prev);
     }
   };
 
@@ -232,7 +254,9 @@ export default function PoliciesPage() {
                 {policies.map((p) => (
                   <div
                     key={p.id}
-                    className="glass-panel rounded-xl border border-white/10 p-5 flex items-start justify-between gap-4"
+                    className={`glass-panel rounded-xl border border-white/10 p-5 flex items-start justify-between gap-4 ${
+                      !p.enabled ? "opacity-60" : ""
+                    }`}
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
@@ -261,6 +285,26 @@ export default function PoliciesPage() {
                           <span>Timeout: {p.approval_timeout_minutes}m</span>
                         )}
                       </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleToggle(p)}
+                        title={p.enabled ? "Disable policy" : "Enable policy"}
+                        className={`p-2 rounded transition-colors ${
+                          p.enabled
+                            ? "text-success hover:bg-success/10"
+                            : "text-zinc-500 hover:text-white hover:bg-white/5"
+                        }`}
+                      >
+                        <Power size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        title="Delete policy"
+                        className="p-2 text-zinc-500 hover:text-danger hover:bg-danger/10 rounded transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
                 ))}

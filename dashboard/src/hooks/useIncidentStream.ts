@@ -12,12 +12,13 @@
  * cleans up on unmount. The poll in the page remains as a fallback if the socket
  * is unavailable.
  *
- * NOTE: the server `/ws` endpoint currently broadcasts to all clients and is not
- * tenant-scoped — see the Phase 4 note. Treat payloads as hints to refresh, not
- * as authorization-bearing data.
+ * The handshake is authenticated: the Clerk session token is passed as a
+ * `?token=` query param, and the server registers the socket under the verified
+ * tenant (org_id) and only pushes that tenant's incident updates.
  */
 
 import { useEffect, useRef, useState } from "react";
+import { getSessionToken } from "@/lib/api";
 
 export interface IncidentUpdate {
   id: string;
@@ -50,8 +51,8 @@ export function useIncidentStream(onUpdate: (update: IncidentUpdate) => void) {
   onUpdateRef.current = onUpdate;
 
   useEffect(() => {
-    const url = resolveWsUrl();
-    if (!url) return;
+    const baseUrl = resolveWsUrl();
+    if (!baseUrl) return;
 
     let ws: WebSocket | null = null;
     let pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,7 +60,17 @@ export function useIncidentStream(onUpdate: (update: IncidentUpdate) => void) {
     let attempts = 0;
     let closedByUnmount = false;
 
-    const connect = () => {
+    const connect = async () => {
+      // Fetch a fresh token each connect — Clerk tokens are short-lived and a
+      // reconnect may happen after the original has expired.
+      const token = await getSessionToken();
+      if (closedByUnmount) return;
+      if (!token) {
+        // Not authenticated yet; retry shortly.
+        reconnectTimer = setTimeout(connect, 2000);
+        return;
+      }
+      const url = `${baseUrl}?token=${encodeURIComponent(token)}`;
       ws = new WebSocket(url);
 
       ws.onopen = () => {

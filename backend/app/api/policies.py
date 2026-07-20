@@ -27,6 +27,17 @@ class PolicyCreate(BaseModel):
     approval_timeout_minutes: int = 15
 
 
+class PolicyUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    action_type: Optional[str] = None
+    auto_approve: Optional[bool] = None
+    conditions: Optional[dict] = None
+    constraints: Optional[dict] = None
+    approval_timeout_minutes: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
 @router.get("")
 async def list_policies(
     tenant_id: str = Depends(get_current_tenant),
@@ -59,7 +70,7 @@ async def list_policies(
     }
 
 
-@router.post("/")
+@router.post("")
 async def create_policy(
     policy: PolicyCreate,
     tenant_id: str = Depends(get_current_tenant),
@@ -154,3 +165,42 @@ async def seed_default_policies(
         "message": f"Created {len(defaults)} default policies",
         "policies": [p.name for p in defaults],
     }
+
+
+async def _get_owned_policy(policy_id: UUID, tenant_id: str, db: AsyncSession) -> Policy:
+    """Fetch a policy scoped to the caller's tenant, or 404."""
+    result = await db.execute(
+        select(Policy).where(Policy.id == policy_id, Policy.tenant_id == tenant_id)
+    )
+    policy = result.scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return policy
+
+
+@router.patch("/{policy_id}")
+async def update_policy(
+    policy_id: UUID,
+    updates: PolicyUpdate,
+    tenant_id: str = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fields on one of the caller's policies (e.g. toggle enabled)."""
+    policy = await _get_owned_policy(policy_id, tenant_id, db)
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(policy, field, value)
+    await db.commit()
+    return {"status": "updated", "id": str(policy.id)}
+
+
+@router.delete("/{policy_id}")
+async def delete_policy(
+    policy_id: UUID,
+    tenant_id: str = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete one of the caller's policies."""
+    policy = await _get_owned_policy(policy_id, tenant_id, db)
+    await db.delete(policy)
+    await db.commit()
+    return {"status": "deleted", "id": str(policy_id)}

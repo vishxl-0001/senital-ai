@@ -23,13 +23,16 @@ from app.api.websockets import manager as ws_manager
 log = structlog.get_logger()
 
 async def _broadcast(incident: Incident):
-    """Helper to broadcast incident updates to connected WebSockets."""
-    await ws_manager.broadcast_incident_update({
-        "id": str(incident.id),
-        "title": incident.title,
-        "status": incident.status.value,
-        "severity": incident.severity.value if incident.severity else None,
-    })
+    """Broadcast an incident update to the owning tenant's WebSocket clients."""
+    await ws_manager.broadcast_incident_update(
+        {
+            "id": str(incident.id),
+            "title": incident.title,
+            "status": incident.status.value,
+            "severity": incident.severity.value if incident.severity else None,
+        },
+        tenant_id=incident.tenant_id,
+    )
 
 async def _add_timeline(db, incident_id, event_type: str, title: str, description: str = "", data: dict = None, actor: str = "ai", tenant_id: str = None):
     """Helper to add a timeline event to an incident."""

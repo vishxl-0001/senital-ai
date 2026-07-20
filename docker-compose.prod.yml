@@ -138,7 +138,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-sentinel_ai}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      # Optional off-box upload — set both to push dumps to Azure Blob Storage:
+      # Off-box upload to Azure Blob. Preferred: a container-scoped SAS URL
+      # (works with the stock image via curl — no az CLI needed):
+      AZURE_BACKUP_SAS_URL: ${AZURE_BACKUP_SAS_URL:-}
+      # Fallback (only used if the az CLI is present in the image):
       AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
       AZURE_BACKUP_CONTAINER: ${AZURE_BACKUP_CONTAINER:-}
     volumes:

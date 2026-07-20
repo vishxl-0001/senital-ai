@@ -42,45 +42,21 @@ async def incident_stats(
     """
     base = select(Incident).where(Incident.tenant_id == tenant_id)
 
-    # ── Counters ──
-    total = (
+    # ── Counters ── one grouped pass over the tenant's incidents (status is
+    # indexed), plus a single MTTR average. Avoids a round-trip per counter.
+    status_counts_rows = (
         await db.execute(
-            select(func.count()).select_from(base.subquery())
+            select(Incident.status, func.count())
+            .where(Incident.tenant_id == tenant_id)
+            .group_by(Incident.status)
         )
-    ).scalar_one()
+    ).all()
+    status_counts = {status: count for status, count in status_counts_rows}
 
-    active = (
-        await db.execute(
-            select(func.count())
-            .select_from(Incident)
-            .where(
-                Incident.tenant_id == tenant_id,
-                Incident.status.in_(_ACTIVE_STATUSES),
-            )
-        )
-    ).scalar_one()
-
-    resolved = (
-        await db.execute(
-            select(func.count())
-            .select_from(Incident)
-            .where(
-                Incident.tenant_id == tenant_id,
-                Incident.status == IncidentStatus.RESOLVED,
-            )
-        )
-    ).scalar_one()
-
-    awaiting_approval = (
-        await db.execute(
-            select(func.count())
-            .select_from(Incident)
-            .where(
-                Incident.tenant_id == tenant_id,
-                Incident.status == IncidentStatus.FIX_PROPOSED,
-            )
-        )
-    ).scalar_one()
+    total = sum(status_counts.values())
+    active = sum(status_counts.get(s, 0) for s in _ACTIVE_STATUSES)
+    resolved = status_counts.get(IncidentStatus.RESOLVED, 0)
+    awaiting_approval = status_counts.get(IncidentStatus.FIX_PROPOSED, 0)
 
     # Average MTTR over resolved incidents that recorded one.
     avg_mttr = (

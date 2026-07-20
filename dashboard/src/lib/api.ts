@@ -16,7 +16,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
  * are client components that fetch after mount — by which point Clerk is loaded
  * and, thanks to middleware, the user is authenticated.
  */
-async function getSessionToken(): Promise<string | null> {
+export async function getSessionToken(): Promise<string | null> {
   if (typeof window === "undefined") return null;
   const clerk = (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string | null> } } }).Clerk;
   try {
@@ -179,7 +179,7 @@ export interface PolicyCreateInput {
 }
 
 export async function createPolicy(data: PolicyCreateInput): Promise<any> {
-  const res = await authedFetch(`${API_BASE}/api/v1/policies/`, {
+  const res = await authedFetch(`${API_BASE}/api/v1/policies`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -196,6 +196,31 @@ export async function seedDefaultPolicies(): Promise<any> {
     method: "POST",
   });
   if (!res.ok) throw new Error(`Failed to seed policies: ${res.status}`);
+  return res.json();
+}
+
+export type PolicyUpdateInput = Partial<
+  Pick<Policy, "name" | "description" | "action_type" | "auto_approve" | "approval_timeout_minutes" | "enabled">
+>;
+
+export async function updatePolicy(id: string, data: PolicyUpdateInput): Promise<any> {
+  const res = await authedFetch(`${API_BASE}/api/v1/policies/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Failed to update policy: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deletePolicy(id: string): Promise<any> {
+  const res = await authedFetch(`${API_BASE}/api/v1/policies/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete policy: ${res.status}`);
   return res.json();
 }
 
